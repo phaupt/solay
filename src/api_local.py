@@ -6,14 +6,17 @@ Fallback: HTTP-Polling (/v2/point) wenn Stream nicht verfügbar.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import ssl
 import threading
 import time
 from typing import Callable
 
 import requests
 import websocket
+from requests.adapters import HTTPAdapter
 
 import config
 from src.models import DeviceStatus, SensorPoint
@@ -22,14 +25,88 @@ from src.storage import Storage
 logger = logging.getLogger(__name__)
 
 
+class FingerprintMismatchError(RuntimeError):
+    """Raised when a pinned TLS fingerprint does not match the peer certificate."""
+
+
+def _normalize_sha256_fingerprint(fingerprint: str | None) -> str | None:
+    """Normalize SHA-256 fingerprints to lowercase hex without separators."""
+    if not fingerprint:
+        return None
+
+    normalized = "".join(ch for ch in fingerprint.lower() if ch in "0123456789abcdef")
+    if len(normalized) != 64:
+        raise ValueError("SM_LOCAL_TLS_FINGERPRINT_SHA256 must be a SHA-256 fingerprint")
+    return normalized
+
+
+def _format_sha256_fingerprint(fingerprint_hex: str) -> str:
+    """Format a normalized hex fingerprint as AA:BB:CC for logs and docs."""
+    pairs = [fingerprint_hex[i:i + 2] for i in range(0, len(fingerprint_hex), 2)]
+    return ":".join(pair.upper() for pair in pairs)
+
+
+def _build_requests_verify_arg(verify_tls: bool, ca_bundle: str | None) -> bool | str:
+    """Build the requests `verify=` argument from config."""
+    return ca_bundle if ca_bundle else verify_tls
+
+
+def _sha256_fingerprint_from_der(cert_der: bytes) -> str:
+    return hashlib.sha256(cert_der).hexdigest()
+
+
+def _peer_certificate_matches_fingerprint(cert_der: bytes, fingerprint: str | None) -> bool:
+    if not fingerprint:
+        return True
+    return _sha256_fingerprint_from_der(cert_der) == fingerprint
+
+
+class FingerprintPinningAdapter(HTTPAdapter):
+    """Requests adapter that pins an HTTPS peer certificate fingerprint."""
+
+    def __init__(self, fingerprint_sha256: str, *args, **kwargs):
+        self._fingerprint_sha256 = fingerprint_sha256
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["assert_fingerprint"] = self._fingerprint_sha256
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs["assert_fingerprint"] = self._fingerprint_sha256
+        return super().proxy_manager_for(*args, **kwargs)
+
+
 class LocalApiClient:
     """HTTP-Client für die lokale Solar Manager API."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        verify_tls: bool | None = None,
+        ca_bundle: str | None = None,
+        fingerprint_sha256: str | None = None,
+    ):
         self._base_url = (base_url or config.SM_LOCAL_BASE_URL).rstrip("/")
         self._api_key = api_key or config.SM_LOCAL_API_KEY
-        self._verify_tls = config.SM_LOCAL_VERIFY_TLS
+        self._verify_tls = (
+            config.SM_LOCAL_VERIFY_TLS if verify_tls is None else verify_tls
+        )
+        self._ca_bundle = ca_bundle if ca_bundle is not None else config.SM_LOCAL_CA_BUNDLE
+        self._fingerprint_sha256 = _normalize_sha256_fingerprint(
+            fingerprint_sha256
+            if fingerprint_sha256 is not None
+            else config.SM_LOCAL_TLS_FINGERPRINT_SHA256
+        )
         self._timeout = config.SM_LOCAL_TIMEOUT_SECONDS
+        self._session = requests.Session()
+
+        if self._fingerprint_sha256:
+            self._session.mount(
+                "https://",
+                FingerprintPinningAdapter(self._fingerprint_sha256),
+            )
 
     def _headers(self) -> dict:
         headers = {}
@@ -37,13 +114,35 @@ class LocalApiClient:
             headers["X-API-Key"] = self._api_key
         return headers
 
+    @property
+    def requests_verify(self) -> bool | str:
+        return _build_requests_verify_arg(self._verify_tls, self._ca_bundle)
+
+    @property
+    def websocket_sslopt(self) -> dict:
+        sslopt: dict[str, object] = {}
+        if self._ca_bundle:
+            sslopt["ca_certs"] = self._ca_bundle
+
+        if self._verify_tls or self._ca_bundle:
+            sslopt["cert_reqs"] = ssl.CERT_REQUIRED
+        else:
+            sslopt["cert_reqs"] = ssl.CERT_NONE
+            sslopt["check_hostname"] = False
+
+        return sslopt
+
+    @property
+    def fingerprint_sha256(self) -> str | None:
+        return self._fingerprint_sha256
+
     def get_point(self) -> dict:
         """Hole aktuellen Datenpunkt via GET /v2/point."""
         url = f"{self._base_url}/v2/point"
-        resp = requests.get(
+        resp = self._session.get(
             url,
             headers=self._headers(),
-            verify=self._verify_tls,
+            verify=self.requests_verify,
             timeout=self._timeout,
         )
         resp.raise_for_status()
@@ -52,10 +151,10 @@ class LocalApiClient:
     def get_devices(self) -> list[dict]:
         """Hole Geräteliste via GET /v2/devices."""
         url = f"{self._base_url}/v2/devices"
-        resp = requests.get(
+        resp = self._session.get(
             url,
             headers=self._headers(),
-            verify=self._verify_tls,
+            verify=self.requests_verify,
             timeout=self._timeout,
         )
         resp.raise_for_status()
@@ -92,6 +191,7 @@ class StreamCollector:
         self._latest_devices: list[DeviceStatus] = []
         self._lock = threading.Lock()
         self._backoff = 1.0  # Initial reconnect delay
+        self._last_stream_error: Exception | None = None
 
     @property
     def latest_point(self) -> SensorPoint | None:
@@ -128,11 +228,24 @@ class StreamCollector:
             if not self._running:
                 break
 
-            # Backoff vor Reconnect
+            # Stream ist weg — aktiv auf Point-Polling wechseln bis Reconnect
             delay = min(self._backoff, 60.0)
-            logger.info("Reconnect in %.0fs (Backoff)", delay)
-            time.sleep(delay)
+            logger.info(
+                "Wechsle auf Point-Polling (alle %ds) für %.0fs, dann Reconnect",
+                config.POLL_INTERVAL_SECONDS, delay,
+            )
+            self._poll_until(delay)
             self._backoff = min(self._backoff * 2, 60.0)
+
+    def _poll_until(self, duration: float):
+        """Polle /v2/point für die angegebene Dauer, dann zurück zum Stream."""
+        deadline = time.monotonic() + duration
+        while self._running and time.monotonic() < deadline:
+            self.poll_once()
+            remaining = deadline - time.monotonic()
+            sleep_time = min(config.POLL_INTERVAL_SECONDS, max(0, remaining))
+            if sleep_time > 0 and self._running:
+                time.sleep(sleep_time)
 
     def _run_stream(self):
         """Verbinde mit WebSocket-Stream."""
@@ -140,6 +253,7 @@ class StreamCollector:
         headers = {}
         if self._client._api_key:
             headers["X-API-Key"] = self._client._api_key
+        self._last_stream_error = None
 
         logger.info("Verbinde mit Stream: %s", url)
 
@@ -153,14 +267,25 @@ class StreamCollector:
         )
 
         ws.run_forever(
-            sslopt={"cert_reqs": 0} if not self._client._verify_tls else {},
+            sslopt=self._client.websocket_sslopt,
             ping_interval=30,
             ping_timeout=10,
         )
 
+        if self._last_stream_error:
+            err = self._last_stream_error
+            self._last_stream_error = None
+            raise err
+
     def _on_ws_open(self, ws):
-        logger.info("Stream-Verbindung hergestellt")
-        self._backoff = 1.0  # Reset backoff on success
+        try:
+            self._verify_websocket_peer_certificate(ws)
+            logger.info("Stream-Verbindung hergestellt")
+            self._backoff = 1.0  # Reset backoff on success
+        except Exception as e:
+            self._last_stream_error = e
+            logger.error("TLS-Zertifikat des Streams ungültig: %s", e)
+            ws.close()
 
     def _on_ws_message(self, ws, message):
         try:
@@ -174,6 +299,31 @@ class StreamCollector:
 
     def _on_ws_close(self, ws, close_status_code, close_msg):
         logger.info("Stream geschlossen: %s %s", close_status_code, close_msg)
+
+    def _verify_websocket_peer_certificate(self, ws):
+        """Prüfe optional den SHA-256-Fingerprint des TLS-Peer-Zertifikats."""
+        fingerprint = self._client.fingerprint_sha256
+        if not fingerprint:
+            return
+
+        try:
+            peer_sock = ws.sock.sock
+            cert_der = peer_sock.getpeercert(binary_form=True)
+        except Exception as e:
+            raise FingerprintMismatchError(
+                f"Peer certificate for WebSocket stream could not be inspected: {e}"
+            ) from e
+
+        if not cert_der:
+            raise FingerprintMismatchError("WebSocket peer did not provide a certificate")
+
+        actual = _sha256_fingerprint_from_der(cert_der)
+        if actual != fingerprint:
+            raise FingerprintMismatchError(
+                "Pinned SHA-256 fingerprint mismatch: "
+                f"expected {_format_sha256_fingerprint(fingerprint)}, "
+                f"got {_format_sha256_fingerprint(actual)}"
+            )
 
     def _process_point(self, data: dict, source: str = "local_stream"):
         """Verarbeite einen API-Datenpunkt: parse, speichere, benachrichtige."""

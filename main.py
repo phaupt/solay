@@ -14,7 +14,8 @@ import argparse
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import config
 from src.aggregator import aggregate_chart_buckets, aggregate_daily_summary
@@ -31,11 +32,10 @@ logger = logging.getLogger(__name__)
 
 def build_dashboard_data(storage: Storage, collector=None) -> DashboardData:
     """Baue DashboardData aus der Datenbank zusammen."""
-    today = date.today()
+    tz = ZoneInfo(config.TIMEZONE)
+    today = datetime.now(tz).date()
 
-    # Punkte des heutigen Tages laden
-    # Offset +1 für CET — in Zukunft via pytz/zoneinfo sauber lösen
-    points = storage.get_points_for_date(today, tz_offset_hours=1.0)
+    points = storage.get_points_for_date(today, tz=tz)
 
     # Chart-Buckets und Tagessummary berechnen
     chart_buckets = aggregate_chart_buckets(points)
@@ -70,11 +70,11 @@ def build_dashboard_data(storage: Storage, collector=None) -> DashboardData:
 
 
 def run_mock_mode(port: int):
-    """Mock-Modus: DB mit Testdaten füllen, dann Browser-Preview."""
+    """Mock-Modus: Separate DB mit Testdaten füllen, dann Browser-Preview."""
     from mock_data import get_mock_devices, seed_mock_database
 
-    db_path = config.DB_PATH
-    # Frische DB für Mock-Modus
+    db_path = config.MOCK_DB_PATH
+    # Frische Mock-DB (nie die Live-DB anfassen)
     if os.path.exists(db_path):
         os.remove(db_path)
 

@@ -35,7 +35,7 @@ class TestSensorPointFromApi:
         assert not point.has_battery
 
     def test_battery_soc_extraction(self):
-        """SOC wird aus dem ersten Batterie-Device extrahiert."""
+        """SOC wird aus dem ersten Device mit soc-Feld extrahiert."""
         data = {
             "t": "2026-03-18T12:00:00Z",
             "cW": 1000, "pW": 5000,
@@ -43,7 +43,7 @@ class TestSensorPointFromApi:
             "cWh": 0, "pWh": 0, "bcWh": 0, "bdWh": 0,
             "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
             "devices": [
-                {"_id": "wallbox_01", "signal": "connected", "power": 0, "soc": 0},
+                {"_id": "wallbox_01", "signal": "connected", "power": 0},
                 {"_id": "battery_01", "signal": "connected", "power": 2000, "soc": 72},
             ],
         }
@@ -51,6 +51,22 @@ class TestSensorPointFromApi:
         assert point.soc == 72.0
         assert point.has_battery
         assert point.bc_w == 2000
+
+    def test_soc_zero_is_valid(self):
+        """SOC=0 ist ein valider Wert (leere Batterie), nicht 'keine Batterie'."""
+        data = {
+            "t": "2026-03-18T23:00:00Z",
+            "cW": 300, "pW": 0,
+            "bcW": 0, "bdW": 0,
+            "cWh": 0, "pWh": 0, "bcWh": 0, "bdWh": 0,
+            "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
+            "devices": [
+                {"_id": "battery_01", "signal": "connected", "power": 0, "soc": 0},
+            ],
+        }
+        point = SensorPoint.from_api(data)
+        assert point.soc == 0.0
+        assert point.has_battery
 
     def test_grid_calculation_without_battery(self):
         """grid_w = cW + bcW - pW - bdW, ohne Batterie."""
@@ -149,8 +165,14 @@ class TestDeviceStatus:
         assert dev.power_w == 500
         assert dev.soc == 80.0
 
-    def test_soc_zero_treated_as_none(self):
-        """SOC 0 wird als None behandelt (kein Batterie-/Auto-Device)."""
-        data = {"_id": "switch_01", "signal": "connected", "power": 0, "soc": 0}
+    def test_soc_zero_is_valid(self):
+        """SOC 0 ist ein valider Wert (leere Batterie)."""
+        data = {"_id": "battery_01", "signal": "connected", "power": 0, "soc": 0}
+        dev = DeviceStatus.from_api(data)
+        assert dev.soc == 0.0
+
+    def test_soc_absent_is_none(self):
+        """Ohne soc-Feld → None (kein Batterie-Device)."""
+        data = {"_id": "switch_01", "signal": "connected", "power": 0}
         dev = DeviceStatus.from_api(data)
         assert dev.soc is None

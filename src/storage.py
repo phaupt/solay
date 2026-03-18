@@ -12,6 +12,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import config
 from src.models import DailySummary, SensorPoint
@@ -97,18 +98,22 @@ class Storage:
                  point.soc, devices_json),
             )
 
-    def get_points_for_date(self, local_date: date, tz_offset_hours: float = 1.0
-                            ) -> list[SensorPoint]:
+    def get_points_for_date(self, local_date: date,
+                            tz: ZoneInfo | None = None) -> list[SensorPoint]:
         """Lade alle Datenpunkte für einen lokalen Kalendertag.
 
-        Konvertiert UTC-Timestamps anhand des Offsets in Lokalzeit für den
-        Tagesfilter.
+        Verwendet die konfigurierte Zeitzone (oder übergebene tz), um die
+        UTC-Range für den lokalen Tag korrekt zu berechnen — auch bei
+        Sommer-/Winterzeitwechsel.
         """
-        # Berechne UTC-Range für den lokalen Tag
-        offset = timedelta(hours=tz_offset_hours)
-        day_start_local = datetime(local_date.year, local_date.month, local_date.day)
-        day_start_utc = (day_start_local - offset).replace(tzinfo=timezone.utc)
-        day_end_utc = day_start_utc + timedelta(days=1)
+        if tz is None:
+            tz = ZoneInfo(config.TIMEZONE)
+
+        # Lokaler Tagesstart → UTC (respektiert DST-Offset automatisch)
+        day_start_local = datetime(local_date.year, local_date.month,
+                                   local_date.day, tzinfo=tz)
+        day_start_utc = day_start_local.astimezone(timezone.utc)
+        day_end_utc = (day_start_local + timedelta(days=1)).astimezone(timezone.utc)
 
         start_str = day_start_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         end_str = day_end_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ")

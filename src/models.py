@@ -55,10 +55,11 @@ class SensorPoint:
             timestamp = datetime.now().astimezone()
 
         # SOC aus Devices extrahieren (Batterie-Device hat soc-Feld)
+        # soc=0 ist ein valider Wert (leere Batterie), daher nur auf None prüfen
         soc = None
         for device in data.get("devices", []):
             device_soc = device.get("soc")
-            if device_soc is not None and device_soc > 0:
+            if device_soc is not None:
                 soc = float(device_soc)
                 break
 
@@ -163,7 +164,7 @@ class DeviceStatus:
             name=data.get("name", device_id),
             signal=data.get("signal", "disconnected"),
             power_w=float(data.get("power", 0)),
-            soc=float(soc_val) if soc_val is not None and soc_val > 0 else None,
+            soc=float(soc_val) if soc_val is not None else None,
         )
 
 

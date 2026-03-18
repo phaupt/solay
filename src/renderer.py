@@ -14,12 +14,15 @@ Eigenverbrauchsquote vs. Autarkiegrad klar getrennt.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont
 
 import config
 from src.models import ChartBucket, DailySummary, DashboardData, SensorPoint
+
+_LOCAL_TZ = ZoneInfo(config.TIMEZONE)
 
 # --- Graustufen-Palette (quantisiert auf 16 Stufen: 0,17,34,...,255) ---
 BLACK = 0
@@ -136,12 +139,10 @@ def _draw_header(draw: ImageDraw.Draw, data: DashboardData, W: int):
     draw.text((60, 35), "\u2600  SOLAR DASHBOARD", fill=BLACK, font=FONTS["title"])
 
     if data.live:
-        ts = data.live.timestamp
-        # Konvertiere zu Lokalzeit (vereinfacht: +1h CET)
-        local_ts = ts + timedelta(hours=1)
+        local_ts = data.live.timestamp.astimezone(_LOCAL_TZ)
         date_str = local_ts.strftime("%d.%m.%Y  %H:%M")
     else:
-        date_str = datetime.now().strftime("%d.%m.%Y  %H:%M")
+        date_str = datetime.now(_LOCAL_TZ).strftime("%d.%m.%Y  %H:%M")
 
     bbox = FONTS["date"].getbbox(date_str)
     draw.text((W - 60 - (bbox[2] - bbox[0]), 40), date_str,
@@ -326,7 +327,7 @@ def _draw_daily_chart(draw: ImageDraw.Draw, data: DashboardData, W: int,
     # PV-Produktion als gefüllte Fläche
     pv_points = []
     for b in buckets:
-        ts_local = b.timestamp + timedelta(hours=1)  # UTC -> CET
+        ts_local = b.timestamp.astimezone(_LOCAL_TZ)
         hour = ts_local.hour + ts_local.minute / 60.0
         x = time_to_x(hour)
         y = power_to_y(b.p_w_avg)
@@ -345,7 +346,7 @@ def _draw_daily_chart(draw: ImageDraw.Draw, data: DashboardData, W: int,
     # Verbrauch als Linie
     cons_points = []
     for b in buckets:
-        ts_local = b.timestamp + timedelta(hours=1)
+        ts_local = b.timestamp.astimezone(_LOCAL_TZ)
         hour = ts_local.hour + ts_local.minute / 60.0
         x = time_to_x(hour)
         y = power_to_y(b.c_w_avg)

@@ -10,7 +10,9 @@ from __future__ import annotations
 import math
 import random
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
+import config
 from src.models import DailySummary, DeviceStatus, SensorPoint
 from src.storage import Storage
 
@@ -49,26 +51,27 @@ def generate_day_points(
     Returns:
         Liste von SensorPoint-Objekten, chronologisch sortiert.
     """
+    tz = ZoneInfo(config.TIMEZONE)
+
     if target_date is None:
-        target_date = date.today()
+        target_date = datetime.now(tz).date()
 
     points = []
     now = datetime.now(timezone.utc)
 
-    # Tag von 00:00 bis 23:59 (oder bis jetzt)
-    day_start = datetime(
-        target_date.year, target_date.month, target_date.day,
-        tzinfo=timezone(timedelta(hours=1)),  # CET
-    ).astimezone(timezone.utc)
-
-    day_end = day_start + timedelta(days=1)
+    # Tag von 00:00 bis 23:59 Lokalzeit (oder bis jetzt)
+    day_start_local = datetime(
+        target_date.year, target_date.month, target_date.day, tzinfo=tz,
+    )
+    day_start = day_start_local.astimezone(timezone.utc)
+    day_end = (day_start_local + timedelta(days=1)).astimezone(timezone.utc)
     if up_to_now and day_end > now:
         day_end = now
 
     current = day_start
     while current < day_end:
-        local_hour = (current + timedelta(hours=1)).hour + \
-                     (current + timedelta(hours=1)).minute / 60.0
+        local_dt = current.astimezone(tz)
+        local_hour = local_dt.hour + local_dt.minute / 60.0
 
         # Leistungswerte mit Rauschen
         pv = _solar_curve(local_hour) * (1 + random.gauss(0, noise_factor))

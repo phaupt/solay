@@ -3,6 +3,7 @@
 import os
 import tempfile
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -43,6 +44,8 @@ class TestStoragePoints:
         assert storage.point_count() == 1
 
     def test_get_points_for_date(self, storage):
+        tz_cet = ZoneInfo("Europe/Zurich")
+
         # 3 Punkte am 18.3., 1 Punkt am 19.3. (UTC)
         storage.store_point(_make_point(8, 0, 0))
         storage.store_point(_make_point(12, 0, 0))
@@ -54,11 +57,48 @@ class TestStoragePoints:
         )
         storage.store_point(p4)
 
-        # Lokaler Tag 18.3. mit CET (+1h)
-        points = storage.get_points_for_date(date(2026, 3, 18), tz_offset_hours=1.0)
+        # Lokaler Tag 18.3. mit Europe/Zurich (CET = +1h)
+        points = storage.get_points_for_date(date(2026, 3, 18), tz=tz_cet)
         # UTC 2026-03-17T23:00 bis 2026-03-18T23:00
         # Die 3 Punkte um 08:00, 12:00, 20:00 UTC fallen rein
         assert len(points) == 3
+
+    def test_get_points_for_date_dst_transition(self, storage):
+        """Sommerzeitwechsel: 29.3.2026 wechselt CET→CEST (UTC+1→UTC+2).
+
+        Lokaler Tag 29.3.: 00:00 CEST = 28.3. 23:00 UTC (noch CET an Tagesstart)
+        Am 29.3. um 02:00 CET → 03:00 CEST, der Tag hat nur 23 Stunden.
+        """
+        tz_zurich = ZoneInfo("Europe/Zurich")
+
+        # Punkt um 28.3. 22:30 UTC = 28.3. 23:30 CET → gehört noch zum 28.3.
+        p_before = SensorPoint(
+            timestamp=datetime(2026, 3, 28, 22, 30, 0, tzinfo=timezone.utc),
+            c_w=100, p_w=0,
+        )
+        # Punkt um 28.3. 23:30 UTC = 29.3. 00:30 CET → gehört zum 29.3.
+        p_start = SensorPoint(
+            timestamp=datetime(2026, 3, 28, 23, 30, 0, tzinfo=timezone.utc),
+            c_w=200, p_w=0,
+        )
+        # Punkt um 29.3. 12:00 UTC = 29.3. 14:00 CEST → gehört zum 29.3.
+        p_mid = SensorPoint(
+            timestamp=datetime(2026, 3, 29, 12, 0, 0, tzinfo=timezone.utc),
+            c_w=300, p_w=0,
+        )
+        # Punkt um 29.3. 22:30 UTC = 30.3. 00:30 CEST → gehört zum 30.3.
+        p_after = SensorPoint(
+            timestamp=datetime(2026, 3, 29, 22, 30, 0, tzinfo=timezone.utc),
+            c_w=400, p_w=0,
+        )
+
+        for p in [p_before, p_start, p_mid, p_after]:
+            storage.store_point(p)
+
+        points = storage.get_points_for_date(date(2026, 3, 29), tz=tz_zurich)
+        assert len(points) == 2
+        assert points[0].c_w == 200
+        assert points[1].c_w == 300
 
 
 class TestStorageDailySummary:
