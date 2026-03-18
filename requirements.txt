@@ -1,0 +1,13 @@
+# Core
+pillow
+requests
+numpy
+
+# WebSocket-Client für lokalen Stream
+websocket-client
+
+# Dev-Modus
+flask
+
+# Tests
+pytest
