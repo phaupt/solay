@@ -43,7 +43,7 @@ def index():
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Solar E-Ink Dashboard</title>
+    <title>{config.DASHBOARD_TITLE}</title>
     <meta charset="utf-8">
     <style>
         body {{
@@ -80,6 +80,12 @@ def index():
         </div>
     </div>
     <script>
+        if (window.location.hash.includes('figmacapture=')) {{
+            const script = document.createElement('script');
+            script.src = 'https://mcp.figma.com/mcp/html-to-design/capture.js';
+            script.async = true;
+            document.head.appendChild(script);
+        }}
         setInterval(function() {{
             document.getElementById('dashboard').src = '/dashboard.png?' + Date.now();
         }}, {refresh_seconds * 1000});

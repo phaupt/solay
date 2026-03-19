@@ -1,14 +1,18 @@
 """Tests: Renderer nutzt konfigurierte Zeitzone statt hartem Offset."""
 
-from datetime import datetime, timezone
-from unittest.mock import patch
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from src.models import ChartBucket, DashboardData, SensorPoint
-from src.renderer import _draw_header, _draw_daily_chart, _LOCAL_TZ, FONTS
 from PIL import Image, ImageDraw
 
 import config
+from src.models import ChartBucket, DailySummary, DashboardData, SensorPoint
+from src.renderer import (
+    _draw_daily_chart,
+    _draw_header,
+    _to_local_timestamp,
+    render_dashboard,
+)
 
 
 def _make_image_and_draw():
@@ -28,8 +32,7 @@ class TestHeaderTimezone:
         _draw_header(draw, data, config.DISPLAY_WIDTH)
 
         # Prüfe die korrekte Lokalzeit-Konvertierung direkt
-        tz = ZoneInfo("Europe/Zurich")
-        local = ts.astimezone(tz)
+        local = _to_local_timestamp(ts)
         assert local.hour == 15
         assert local.minute == 30
 
@@ -42,8 +45,7 @@ class TestHeaderTimezone:
         img, draw = _make_image_and_draw()
         _draw_header(draw, data, config.DISPLAY_WIDTH)
 
-        tz = ZoneInfo("Europe/Zurich")
-        local = ts.astimezone(tz)
+        local = _to_local_timestamp(ts)
         assert local.hour == 16
         assert local.minute == 30
 
@@ -80,5 +82,66 @@ class TestChartTimezone:
         data = DashboardData(chart_buckets=buckets)
 
         img, draw = _make_image_and_draw()
-        _draw_daily_chart(draw, data, config.DISPLAY_WIDTH, 300, 640)
+        _draw_daily_chart(draw, data, 48, 300, 1048, 640)
         # Kein Fehler = Konvertierung funktioniert
+
+
+class TestRenderDashboardStates:
+    """Renderer muss für alle definierten Zustände ohne Fehler laufen."""
+
+    def _make_live(self, **kwargs):
+        defaults = dict(
+            timestamp=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+            c_w=3000, p_w=5000,
+        )
+        defaults.update(kwargs)
+        return SensorPoint(**defaults)
+
+    def _make_history(self):
+        return [
+            DailySummary(local_date=date(2026, 3, d),
+                         production_wh=30000, consumption_wh=8000, samples=100)
+            for d in range(12, 19)
+        ]
+
+    def test_solar_to_home_battery_grid(self):
+        """PV verteilt an Haus, Batterie und Netz (Export)."""
+        live = self._make_live(p_w=8000, c_w=3000, bc_w=1500, soc=60)
+        data = DashboardData(live=live, daily_history=self._make_history())
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_solar_and_grid_to_home(self):
+        """PV und Netz versorgen gemeinsam das Haus."""
+        live = self._make_live(p_w=2000, c_w=5000, soc=80)
+        data = DashboardData(live=live, daily_history=self._make_history())
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_grid_only(self):
+        """Nacht: nur Netzbezug."""
+        live = self._make_live(p_w=0, c_w=500, soc=50)
+        data = DashboardData(live=live, daily_history=self._make_history())
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_battery_unavailable(self):
+        """Kein Batteriesystem vorhanden."""
+        live = self._make_live(p_w=5000, c_w=3000)
+        assert not live.has_battery
+        data = DashboardData(live=live, daily_history=self._make_history())
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_no_live_data(self):
+        """Keine Live-Daten verfügbar."""
+        data = DashboardData()
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_stale_data_no_history(self):
+        """Live-Daten vorhanden aber keine Historie."""
+        live = self._make_live(p_w=1000, c_w=800)
+        data = DashboardData(live=live)
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)

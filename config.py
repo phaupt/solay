@@ -63,6 +63,7 @@ TIMEZONE = os.getenv("TZ", "Europe/Zurich")
 # --- Display ---
 DISPLAY_WIDTH = 1872
 DISPLAY_HEIGHT = 1404
+DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "SOLAR DASHBOARD")
 
 # --- Datenerfassung ---
 # Intervall für point-Polling als Fallback wenn Stream nicht verfügbar

@@ -1,46 +1,50 @@
-"""Dashboard-Renderer: Erzeugt ein 1872x1404 Graustufen-Bild mit Pillow.
+"""Dashboard renderer – Figma-aligned layout.
 
-Rendert basierend auf dem typisierten DashboardData-Modell:
-- Energiefluss-Karten (PV, Haus, Netz, optional Batterie)
-- Tagesgrafik "Heute" mit Zeitachse und Leistungskurven
-- Tageswerte (korrekt aggregiert)
-- Geräte-Status
-- PV-Performance (7/30 Tage)
-
-Korrekte Netzberechnung: grid = cW + bcW - pW - bdW
-Eigenverbrauchsquote vs. Autarkiegrad klar getrennt.
+Side-by-side chart + energy-flow at top, 7-day history strip at bottom.
+Four-node energy flow diamond: Solar, Grid, Home, Battery.
 """
 
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 import config
-from src.models import ChartBucket, DailySummary, DashboardData, SensorPoint
+from src.models import DashboardData
 
-_LOCAL_TZ = ZoneInfo(config.TIMEZONE)
+# ── Grayscale palette ──────────────────────────────────────────────
 
-# --- Graustufen-Palette (quantisiert auf 16 Stufen: 0,17,34,...,255) ---
 BLACK = 0
-DARK_GRAY = 51
-MID_GRAY = 119
-LIGHT_GRAY = 187
-CARD_BG = 238
+TEXT_DARK = 34
+TEXT_MID = 102
+TEXT_LIGHT = 153
+LINE_DARK = 68
+LINE_MID = 136
+LINE_LIGHT = 187
+FILL_NODE = 238
+FILL_PANEL = 247
 WHITE = 255
 
-# Chart-Farben
-CHART_PV = 68  # Dunkler für PV-Fläche
-CHART_PV_FILL = 204  # Heller für PV-Füllung
-CHART_CONSUMPTION = 34  # Fast schwarz für Verbrauch-Linie
-CHART_GRID_LINE = 170  # Grau für Achsen
+CHART_PV_FILL = 214
+CHART_PV_LINE = 170
+CHART_CON_FILL = 136
+CHART_CON_LINE = 51
 
+FLOW_THRESHOLD_W = 50
+
+# ── Layout constants ───────────────────────────────────────────────
+
+MARGIN = 48
+GAP = 24
+
+
+# ── Font loading ───────────────────────────────────────────────────
 
 def _load_fonts() -> dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont]:
-    """Lade Schriften mit Fallback-Kette."""
     font_paths = [
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -48,20 +52,23 @@ def _load_fonts() -> dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont]:
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ]
     sizes = {
-        "title": 42, "date": 34, "card_label": 28, "card_value": 68,
-        "card_unit": 28, "flow_label": 24, "stats_label": 26,
-        "stats_value": 42, "device_text": 26, "small": 20,
-        "chart_label": 20, "chart_value": 18,
+        "title": 28,
+        "meta": 18,
+        "node_label": 20,
+        "node_value": 46,
+        "node_unit": 20,
+        "node_sub": 17,
+        "chart_axis": 20,
+        "week_day": 24,
+        "week_value_lg": 36,
+        "week_value_sm": 28,
+        "week_label": 16,
     }
-    fonts = {}
     for path in font_paths:
         try:
-            for name, size in sizes.items():
-                fonts[name] = ImageFont.truetype(path, size)
-            return fonts
+            return {name: ImageFont.truetype(path, size) for name, size in sizes.items()}
         except (OSError, IOError):
             continue
-
     default = ImageFont.load_default()
     return {name: default for name in sizes}
 
@@ -69,17 +76,57 @@ def _load_fonts() -> dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont]:
 FONTS = _load_fonts()
 
 
+# ── Utility functions ──────────────────────────────────────────────
+
+def _local_timezone() -> ZoneInfo:
+    return ZoneInfo(config.TIMEZONE)
+
+
+def _to_local_timestamp(ts: datetime) -> datetime:
+    tz = _local_timezone()
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=tz)
+    return ts.astimezone(tz)
+
+
+def _rounded_rect(draw: ImageDraw.Draw, xy: tuple[int, int, int, int], radius: int,
+                  fill: int, outline: int | None = None, width: int = 1) -> None:
+    draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def _centered_text(draw: ImageDraw.Draw, center_x: float, top_y: float, text: str,
+                   *, font: ImageFont.ImageFont, fill: int) -> tuple[float, float]:
+    bbox = font.getbbox(text)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    x = center_x - text_w / 2
+    draw.text((x, top_y), text, fill=fill, font=font)
+    return x, top_y + text_h
+
+
 def _format_power(watts: float) -> tuple[str, str]:
-    """Formatiere Watt-Wert: ab 1000W als kW."""
-    if abs(watts) >= 10000:
+    watts = abs(watts)
+    if watts >= 10000:
         return f"{watts / 1000:.0f}", "kW"
-    if abs(watts) >= 1000:
+    if watts >= 1000:
         return f"{watts / 1000:.1f}", "kW"
     return f"{round(watts)}", "W"
 
 
+def _format_power_signed(watts: float) -> tuple[str, str]:
+    """Format power with explicit sign for grid display."""
+    if abs(watts) < FLOW_THRESHOLD_W:
+        return "0", "W"
+    sign = "+" if watts > 0 else "-"
+    abs_w = abs(watts)
+    if abs_w >= 10000:
+        return f"{sign}{abs_w / 1000:.0f}", "kW"
+    if abs_w >= 1000:
+        return f"{sign}{abs_w / 1000:.1f}", "kW"
+    return f"{sign}{round(abs_w)}", "W"
+
+
 def _format_kwh(wh: float) -> str:
-    """Formatiere Wh als kWh."""
     kwh = wh / 1000
     if kwh >= 100:
         return f"{kwh:.0f}"
@@ -88,391 +135,376 @@ def _format_kwh(wh: float) -> str:
     return f"{kwh:.2f}"
 
 
-def _rounded_rect(draw: ImageDraw.Draw, xy: tuple, radius: int,
-                  fill: int, outline: int | None = None):
-    draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline)
-
+# ── Main entry point ──────────────────────────────────────────────
 
 def render_dashboard(data: DashboardData) -> Image.Image:
-    """Rendere das komplette Dashboard als PIL Image.
+    width = config.DISPLAY_WIDTH
+    height = config.DISPLAY_HEIGHT
 
-    Returns:
-        PIL Image im Modus "L" (Graustufen), 1872x1404 px.
-    """
-    W = config.DISPLAY_WIDTH
-    H = config.DISPLAY_HEIGHT
-    img = Image.new("L", (W, H), WHITE)
+    img = Image.new("L", (width, height), WHITE)
     draw = ImageDraw.Draw(img)
 
-    # === HEADER ===
-    _draw_header(draw, data, W)
+    header_bottom = _draw_header(draw, data, width)
 
-    # === ENERGIEFLUSS ===
-    flow_bottom = _draw_energy_flow(draw, data, W)
+    main_top = header_bottom + 12
+    weekly_h = 260
+    weekly_bottom = height - 36
+    weekly_top = weekly_bottom - weekly_h
+    main_bottom = weekly_top - GAP
 
-    # === TAGESGRAFIK ===
-    chart_top = flow_bottom + 15
-    chart_bottom = chart_top + 340
-    _draw_daily_chart(draw, data, W, chart_top, chart_bottom)
+    chart_w = 1000
+    chart_left = MARGIN
+    chart_right = chart_left + chart_w
+    flow_left = chart_right + GAP
+    flow_right = width - MARGIN
 
-    # === TRENNLINIE ===
-    sep1 = chart_bottom + 15
-    draw.line([(60, sep1), (W - 60, sep1)], fill=LIGHT_GRAY, width=1)
+    _draw_daily_chart(draw, data, chart_left, main_top, chart_right, main_bottom)
+    _draw_energy_flow(draw, data, flow_left, main_top, flow_right, main_bottom)
+    _draw_week_history(draw, data, MARGIN, weekly_top, width - MARGIN, weekly_bottom)
 
-    # === TAGESWERTE ===
-    _draw_daily_stats(draw, data, W, sep1 + 10)
-
-    # === TRENNLINIE ===
-    sep2 = sep1 + 135
-    draw.line([(60, sep2), (W - 60, sep2)], fill=LIGHT_GRAY, width=1)
-
-    # === GERÄTE + PV-PERFORMANCE ===
-    _draw_bottom_row(draw, data, W, H, sep2 + 10)
-
-    # Quantisierung auf 16 Graustufen
-    img = _quantize_16_grayscale(img)
-
-    return img
+    return _quantize_16_grayscale(img)
 
 
-def _draw_header(draw: ImageDraw.Draw, data: DashboardData, W: int):
-    draw.text((60, 35), "\u2600  SOLAR DASHBOARD", fill=BLACK, font=FONTS["title"])
+# ── Header ─────────────────────────────────────────────────────────
 
-    if data.live:
-        local_ts = data.live.timestamp.astimezone(_LOCAL_TZ)
-        date_str = local_ts.strftime("%d.%m.%Y  %H:%M")
+def _draw_header(draw: ImageDraw.Draw, data: DashboardData, width: int) -> int:
+    draw.text((MARGIN, 28), config.DASHBOARD_TITLE, fill=TEXT_DARK, font=FONTS["title"])
+    return 64
+
+
+# ── Energy flow ────────────────────────────────────────────────────
+
+def _draw_flow_node(draw: ImageDraw.Draw, cx: int, cy: int, radius: int,
+                    label: str, label_pos: str, value: str, unit: str,
+                    *, sub: str | None = None, dimmed: bool = False) -> None:
+    """Draw one flow node: circle with outer label and inner value."""
+    fill_color = FILL_NODE if not dimmed else 250
+    outline_color = LINE_MID if not dimmed else LINE_LIGHT
+    outline_w = 3 if not dimmed else 2
+
+    draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius),
+                 fill=fill_color, outline=outline_color, width=outline_w)
+
+    lbl_fill = TEXT_MID if not dimmed else TEXT_LIGHT
+    if label_pos == "top":
+        _centered_text(draw, cx, cy - radius - 30, label,
+                       font=FONTS["node_label"], fill=lbl_fill)
     else:
-        date_str = datetime.now(_LOCAL_TZ).strftime("%d.%m.%Y  %H:%M")
+        _centered_text(draw, cx, cy + radius + 10, label,
+                       font=FONTS["node_label"], fill=lbl_fill)
 
-    bbox = FONTS["date"].getbbox(date_str)
-    draw.text((W - 60 - (bbox[2] - bbox[0]), 40), date_str,
-              fill=DARK_GRAY, font=FONTS["date"])
-    draw.line([(60, 90), (W - 60, 90)], fill=LIGHT_GRAY, width=1)
+    val_fill = TEXT_DARK if not dimmed else TEXT_LIGHT
+    unit_fill = TEXT_MID if not dimmed else TEXT_LIGHT
+    val_y = cy - 24 if sub else cy - 16
 
-
-def _draw_energy_flow(draw: ImageDraw.Draw, data: DashboardData, W: int) -> int:
-    """Energiefluss-Karten. Gibt die Y-Position unterhalb zurück."""
-    live = data.live
-    if live is None:
-        draw.text((60, 120), "Keine Live-Daten", fill=MID_GRAY, font=FONTS["card_label"])
-        return 300
-
-    has_bat = live.has_battery
-    card_w = 340 if has_bat else 400
-    card_h = 170
-    y_top = 110
-
-    # Layout: 3 oder 4 Karten in einer Reihe
-    if has_bat:
-        # PV | Haus | Batterie | Netz
-        gap = (W - 120 - 4 * card_w) // 3
-        positions = [(60, y_top)]
-        for i in range(1, 4):
-            positions.append((60 + i * (card_w + gap), y_top))
-
-        _draw_power_card(draw, *positions[0], card_w, card_h,
-                         "PV", live.p_w, icon="\u2600")
-        _draw_power_card(draw, *positions[1], card_w, card_h,
-                         "HAUS", live.c_w, icon="\u2302")
-        _draw_battery_card(draw, *positions[2], card_w, card_h,
-                           live.bc_w, live.bd_w, live.soc)
-
-        grid_w = live.grid_w
-        grid_label = "EINSPEISUNG" if grid_w <= 0 else "BEZUG"
-        _draw_power_card(draw, *positions[3], card_w, card_h,
-                         grid_label, abs(grid_w), icon="\u26A1")
+    if unit:
+        val_bbox = FONTS["node_value"].getbbox(value)
+        unit_bbox = FONTS["node_unit"].getbbox(unit)
+        val_w = val_bbox[2] - val_bbox[0]
+        unit_w = unit_bbox[2] - unit_bbox[0]
+        total_w = val_w + 6 + unit_w
+        start_x = cx - total_w / 2
+        draw.text((start_x, val_y), value, fill=val_fill, font=FONTS["node_value"])
+        draw.text((start_x + val_w + 6, val_y + 20), unit,
+                  fill=unit_fill, font=FONTS["node_unit"])
     else:
-        # PV | Haus | Netz
-        gap = (W - 120 - 3 * card_w) // 2
-        positions = [(60, y_top)]
-        for i in range(1, 3):
-            positions.append((60 + i * (card_w + gap), y_top))
+        _centered_text(draw, cx, val_y, value,
+                       font=FONTS["node_value"], fill=val_fill)
 
-        _draw_power_card(draw, *positions[0], card_w, card_h,
-                         "PV", live.p_w, icon="\u2600")
-        _draw_power_card(draw, *positions[1], card_w, card_h,
-                         "HAUS", live.c_w, icon="\u2302")
-
-        grid_w = live.grid_w
-        grid_label = "EINSPEISUNG" if grid_w <= 0 else "BEZUG"
-        _draw_power_card(draw, *positions[2], card_w, card_h,
-                         grid_label, abs(grid_w), icon="\u26A1")
-
-    # Fluss-Pfeile zwischen den Karten
-    arrow_y = y_top + card_h // 2
-    for i in range(len(positions) - 1):
-        x1 = positions[i][0] + card_w
-        x2 = positions[i + 1][0]
-        mid_x = (x1 + x2) // 2
-        draw.line([(x1 + 4, arrow_y), (x2 - 4, arrow_y)], fill=MID_GRAY, width=2)
-        # Pfeilspitze
-        draw.polygon(
-            [(x2 - 4, arrow_y), (x2 - 14, arrow_y - 6), (x2 - 14, arrow_y + 6)],
-            fill=MID_GRAY,
-        )
-
-    return y_top + card_h
+    if sub:
+        sub_fill = TEXT_MID if not dimmed else TEXT_LIGHT
+        _centered_text(draw, cx, cy + 22, sub,
+                       font=FONTS["node_sub"], fill=sub_fill)
 
 
-def _draw_power_card(draw: ImageDraw.Draw, x: int, y: int, w: int, h: int,
-                     label: str, watts: float, icon: str = ""):
-    _rounded_rect(draw, (x, y, x + w, y + h), radius=16, fill=CARD_BG)
-    # Label
-    label_text = f"{icon}  {label}" if icon else label
-    draw.text((x + 16, y + 14), label_text, fill=DARK_GRAY, font=FONTS["card_label"])
-    # Wert
-    val, unit = _format_power(watts)
-    draw.text((x + 16, y + 55), val, fill=BLACK, font=FONTS["card_value"])
-    val_bbox = FONTS["card_value"].getbbox(val)
-    unit_x = x + 16 + (val_bbox[2] - val_bbox[0]) + 8
-    draw.text((unit_x, y + 80), unit, fill=MID_GRAY, font=FONTS["card_unit"])
-
-
-def _draw_battery_card(draw: ImageDraw.Draw, x: int, y: int, w: int, h: int,
-                       charge_w: float, discharge_w: float, soc: float | None):
-    _rounded_rect(draw, (x, y, x + w, y + h), radius=16, fill=CARD_BG)
-
-    if discharge_w > 0:
-        label = "BATTERIE \u25BC"  # Entladen
-        power = discharge_w
-    elif charge_w > 0:
-        label = "BATTERIE \u25B2"  # Laden
-        power = charge_w
-    else:
-        label = "BATTERIE"
-        power = 0
-
-    draw.text((x + 16, y + 14), label, fill=DARK_GRAY, font=FONTS["card_label"])
-
-    # SOC-Balken
-    if soc is not None:
-        bar_x = x + 16
-        bar_y = y + 52
-        bar_w = w - 32
-        bar_h = 20
-        _rounded_rect(draw, (bar_x, bar_y, bar_x + bar_w, bar_y + bar_h),
-                      radius=6, fill=WHITE, outline=MID_GRAY)
-        fill_w = max(0, min(bar_w - 2, int((bar_w - 2) * soc / 100)))
-        if fill_w > 2:
-            _rounded_rect(draw, (bar_x + 1, bar_y + 1, bar_x + 1 + fill_w, bar_y + bar_h - 1),
-                          radius=5, fill=DARK_GRAY)
-        soc_text = f"{soc:.0f}%"
-        draw.text((bar_x + bar_w + 8 - 50, bar_y + 1), soc_text,
-                  fill=BLACK, font=FONTS["chart_label"])
-
-    # Leistung
-    if power > 0:
-        val, unit = _format_power(power)
-        draw.text((x + 16, y + 85), val, fill=BLACK, font=FONTS["stats_value"])
-        val_bbox = FONTS["stats_value"].getbbox(val)
-        draw.text((x + 16 + (val_bbox[2] - val_bbox[0]) + 6, y + 95),
-                  unit, fill=MID_GRAY, font=FONTS["chart_label"])
-    else:
-        draw.text((x + 16, y + 85), "Standby", fill=MID_GRAY, font=FONTS["stats_value"])
-
-
-def _draw_daily_chart(draw: ImageDraw.Draw, data: DashboardData, W: int,
-                      y_top: int, y_bottom: int):
-    """Tagesgrafik: PV-Produktion und Verbrauch über den Tag."""
-    chart_left = 120
-    chart_right = W - 60
-    chart_top = y_top + 35
-    chart_bottom = y_bottom - 30
-    chart_w = chart_right - chart_left
-    chart_h = chart_bottom - chart_top
-
-    # Titel
-    draw.text((60, y_top + 5), "HEUTE", fill=BLACK, font=FONTS["stats_label"])
-
-    buckets = data.chart_buckets
-    if not buckets:
-        draw.text((chart_left + chart_w // 2 - 80, chart_top + chart_h // 2 - 10),
-                  "Keine Daten", fill=MID_GRAY, font=FONTS["card_label"])
-        # Trotzdem Achsen zeichnen
-        draw.line([(chart_left, chart_bottom), (chart_right, chart_bottom)],
-                  fill=CHART_GRID_LINE, width=1)
-        draw.line([(chart_left, chart_top), (chart_left, chart_bottom)],
-                  fill=CHART_GRID_LINE, width=1)
+def _draw_flow_path(draw: ImageDraw.Draw, start: tuple[int, int],
+                    end: tuple[int, int], radius: int, *, active: bool) -> None:
+    """Draw a flow path (line + optional arrowhead)."""
+    x1, y1 = start
+    x2, y2 = end
+    dx, dy = x2 - x1, y2 - y1
+    dist = math.hypot(dx, dy)
+    if dist == 0:
         return
 
-    # Y-Achse: Max-Wert bestimmen
+    ux, uy = dx / dist, dy / dist
+    edge_gap = radius + 6
+    sx, sy = x1 + ux * edge_gap, y1 + uy * edge_gap
+    ex, ey = x2 - ux * edge_gap, y2 - uy * edge_gap
+
+    if active:
+        draw.line([(sx, sy), (ex, ey)], fill=LINE_DARK, width=5)
+        a_len, a_half = 16, 8
+        px, py = -uy, ux
+        tip = (ex, ey)
+        left = (ex - ux * a_len + px * a_half, ey - uy * a_len + py * a_half)
+        right = (ex - ux * a_len - px * a_half, ey - uy * a_len - py * a_half)
+        draw.polygon([tip, left, right], fill=LINE_DARK)
+    else:
+        draw.line([(sx, sy), (ex, ey)], fill=LINE_LIGHT, width=2)
+
+
+def _draw_energy_flow(draw: ImageDraw.Draw, data: DashboardData,
+                      panel_left: int, panel_top: int,
+                      panel_right: int, panel_bottom: int) -> None:
+    _rounded_rect(draw, (panel_left, panel_top, panel_right, panel_bottom),
+                  radius=20, fill=FILL_PANEL, outline=LINE_LIGHT)
+
+    cx = (panel_left + panel_right) // 2
+    panel_h = panel_bottom - panel_top
+    panel_w = panel_right - panel_left
+
+    # Diamond layout, leaving bottom space for "Last update" meta text
+    diamond = min(700, panel_w - 60, panel_h - 100)
+    meta_reserve = 50
+    avail_h = panel_h - meta_reserve
+    diamond_top = panel_top + (avail_h - diamond) // 2
+
+    solar_pos = (cx, diamond_top + int(diamond * 0.12))
+    grid_pos = (cx - int(diamond * 0.32), diamond_top + int(diamond * 0.50))
+    home_pos = (cx + int(diamond * 0.32), diamond_top + int(diamond * 0.50))
+    battery_pos = (cx, diamond_top + int(diamond * 0.88))
+
+    radius = 82
+
+    all_path_keys = [
+        ("solar", "home"),
+        ("solar", "grid"),
+        ("solar", "battery"),
+        ("grid", "home"),
+        ("battery", "home"),
+    ]
+    positions = {
+        "solar": solar_pos,
+        "grid": grid_pos,
+        "home": home_pos,
+        "battery": battery_pos,
+    }
+
+    live = data.live
+
+    if live is None:
+        for key, pos in positions.items():
+            lbl = {"solar": "SOLAR", "grid": "NETZ", "home": "HAUS", "battery": "BATTERIE"}[key]
+            lpos = "bottom" if key == "battery" else "top"
+            _draw_flow_node(draw, *pos, radius, lbl, lpos, "\u2014", "", dimmed=True)
+        for a, b in all_path_keys:
+            _draw_flow_path(draw, positions[a], positions[b], radius, active=False)
+        _centered_text(draw, cx, panel_bottom - 36, "Keine Live-Daten",
+                       font=FONTS["meta"], fill=TEXT_LIGHT)
+        return
+
+    p_w, c_w, grid_w = live.p_w, live.c_w, live.grid_w
+    bc_w, bd_w, soc = live.bc_w, live.bd_w, live.soc
+    has_bat = live.has_battery
+
+    # ── Nodes ──
+
+    pv_v, pv_u = _format_power(p_w)
+    _draw_flow_node(draw, *solar_pos, radius, "SOLAR", "top", pv_v, pv_u)
+
+    grid_v, grid_u = _format_power_signed(grid_w)
+    grid_sub = ("Import" if grid_w > FLOW_THRESHOLD_W
+                else ("Export" if grid_w < -FLOW_THRESHOLD_W else None))
+    _draw_flow_node(draw, *grid_pos, radius, "NETZ", "top", grid_v, grid_u, sub=grid_sub)
+
+    home_v, home_u = _format_power(c_w)
+    _draw_flow_node(draw, *home_pos, radius, "HAUS", "top", home_v, home_u)
+
+    if has_bat:
+        bat_w = max(bc_w, bd_w)
+        bat_v, bat_u = _format_power(bat_w)
+        if soc is not None:
+            bat_sub = f"{int(soc)}%"
+            if bc_w > FLOW_THRESHOLD_W:
+                bat_sub += " Laden"
+            elif bd_w > FLOW_THRESHOLD_W:
+                bat_sub += " Entladen"
+        else:
+            bat_sub = None
+        _draw_flow_node(draw, *battery_pos, radius, "BATTERIE", "bottom",
+                        bat_v, bat_u, sub=bat_sub)
+    else:
+        _draw_flow_node(draw, *battery_pos, radius, "BATTERIE", "bottom",
+                        "\u2014", "", dimmed=True)
+
+    # ── Paths ──
+
+    active_map = {
+        ("solar", "home"): p_w > FLOW_THRESHOLD_W and c_w > FLOW_THRESHOLD_W,
+        ("solar", "grid"): grid_w < -FLOW_THRESHOLD_W,
+        ("solar", "battery"): has_bat and bc_w > FLOW_THRESHOLD_W,
+        ("grid", "home"): grid_w > FLOW_THRESHOLD_W,
+        ("battery", "home"): has_bat and bd_w > FLOW_THRESHOLD_W,
+    }
+
+    # Draw inactive first, then active on top
+    for a, b in all_path_keys:
+        if not active_map[(a, b)]:
+            _draw_flow_path(draw, positions[a], positions[b], radius, active=False)
+    for a, b in all_path_keys:
+        if active_map[(a, b)]:
+            _draw_flow_path(draw, positions[a], positions[b], radius, active=True)
+
+    # ── Meta: last update ──
+
+    local_ts = _to_local_timestamp(live.timestamp)
+    update_str = f"Last update \u00b7 {local_ts.strftime('%H:%M')}"
+    bbox = FONTS["meta"].getbbox(update_str)
+    text_w = bbox[2] - bbox[0]
+    draw.text((panel_right - text_w - 24, panel_bottom - 36),
+              update_str, fill=TEXT_LIGHT, font=FONTS["meta"])
+
+
+# ── Chart ──────────────────────────────────────────────────────────
+
+def _draw_daily_chart(draw: ImageDraw.Draw, data: DashboardData,
+                      panel_left: int, panel_top: int,
+                      panel_right: int, panel_bottom: int) -> int:
+    _rounded_rect(draw, (panel_left, panel_top, panel_right, panel_bottom),
+                  radius=20, fill=FILL_PANEL, outline=LINE_LIGHT)
+
+    chart_left = panel_left + 90
+    chart_right = panel_right - 24
+    chart_top = panel_top + 44
+    chart_bottom = panel_bottom - 52
+    chart_width = chart_right - chart_left
+    chart_height = chart_bottom - chart_top
+
+    draw.text((panel_left + 20, panel_top + 4), "kW",
+              fill=TEXT_MID, font=FONTS["chart_axis"])
+
+    buckets = data.chart_buckets
     max_power = max(
         max((b.p_w_avg for b in buckets), default=0),
         max((b.c_w_avg for b in buckets), default=0),
     )
-    y_max = max(1000, math.ceil(max_power / 2000) * 2000)  # Aufrunden auf 2kW
+    y_max = max(1000, math.ceil(max_power / 2000) * 2000)
 
-    # X-Achse: 0-24h
     def time_to_x(hour: float) -> int:
-        return chart_left + int(chart_w * hour / 24)
+        return chart_left + int(chart_width * hour / 24.0)
 
     def power_to_y(watts: float) -> int:
-        return chart_bottom - int(chart_h * min(watts, y_max) / y_max)
+        clamped = max(0.0, min(watts, y_max))
+        return chart_bottom - int(chart_height * clamped / y_max)
 
-    # Gitterlinien (horizontal)
-    for kw in range(0, int(y_max / 1000) + 1, 2):
+    # Y grid lines + labels
+    y_step_kw = max(2, int(math.ceil((y_max / 1000) / 6)))
+    if y_step_kw % 2 != 0:
+        y_step_kw += 1
+    for kw in range(0, int(y_max / 1000) + 1, y_step_kw):
         y = power_to_y(kw * 1000)
-        draw.line([(chart_left, y), (chart_right, y)], fill=LIGHT_GRAY, width=1)
-        draw.text((chart_left - 55, y - 10), f"{kw} kW",
-                  fill=MID_GRAY, font=FONTS["chart_value"])
+        draw.line([(chart_left, y), (chart_right, y)], fill=LINE_LIGHT, width=1)
+        draw.text((panel_left + 20, y - 10), str(kw),
+                  fill=TEXT_MID, font=FONTS["chart_axis"])
 
-    # Gitterlinien (vertikal, alle 3h)
-    for h in range(0, 25, 3):
-        x = time_to_x(h)
-        draw.line([(x, chart_top), (x, chart_bottom)], fill=LIGHT_GRAY, width=1)
-        if h < 24:
-            draw.text((x - 8, chart_bottom + 4), f"{h:02d}",
-                      fill=MID_GRAY, font=FONTS["chart_value"])
-
-    # PV-Produktion als gefüllte Fläche
-    pv_points = []
-    for b in buckets:
-        ts_local = b.timestamp.astimezone(_LOCAL_TZ)
-        hour = ts_local.hour + ts_local.minute / 60.0
+    # X grid lines + labels
+    for hour in range(0, 25, 2):
         x = time_to_x(hour)
-        y = power_to_y(b.p_w_avg)
-        pv_points.append((x, y))
+        draw.line([(x, chart_top), (x, chart_bottom)], fill=LINE_LIGHT, width=1)
+        label = "24" if hour == 24 else f"{hour:02d}"
+        draw.text((x - 10, chart_bottom + 8), label,
+                  fill=TEXT_MID, font=FONTS["chart_axis"])
 
-    if len(pv_points) >= 2:
-        # Geschlossenes Polygon für Füllung
-        fill_points = [(pv_points[0][0], chart_bottom)]
-        fill_points.extend(pv_points)
-        fill_points.append((pv_points[-1][0], chart_bottom))
-        draw.polygon(fill_points, fill=CHART_PV_FILL)
+    # Data areas
+    if buckets:
+        tz = _local_timezone()
+        pv_pts: list[tuple[int, int]] = []
+        con_pts: list[tuple[int, int]] = []
+        for bucket in buckets:
+            lt = bucket.timestamp.astimezone(tz)
+            h = lt.hour + lt.minute / 60.0
+            x = time_to_x(h)
+            pv_pts.append((x, power_to_y(bucket.p_w_avg)))
+            con_pts.append((x, power_to_y(bucket.c_w_avg)))
 
-        # PV-Linie obendrauf
-        draw.line(pv_points, fill=CHART_PV, width=3)
+        if len(pv_pts) >= 2:
+            fill_pts = [(pv_pts[0][0], chart_bottom), *pv_pts,
+                        (pv_pts[-1][0], chart_bottom)]
+            draw.polygon(fill_pts, fill=CHART_PV_FILL)
+            draw.line(pv_pts, fill=CHART_PV_LINE, width=2)
 
-    # Verbrauch als Linie
-    cons_points = []
-    for b in buckets:
-        ts_local = b.timestamp.astimezone(_LOCAL_TZ)
-        hour = ts_local.hour + ts_local.minute / 60.0
-        x = time_to_x(hour)
-        y = power_to_y(b.c_w_avg)
-        cons_points.append((x, y))
-
-    if len(cons_points) >= 2:
-        draw.line(cons_points, fill=CHART_CONSUMPTION, width=2)
-
-    # Legende
-    legend_x = chart_right - 200
-    legend_y = y_top + 5
-    draw.rectangle([(legend_x, legend_y + 4), (legend_x + 20, legend_y + 14)],
-                   fill=CHART_PV_FILL, outline=CHART_PV)
-    draw.text((legend_x + 26, legend_y), "PV", fill=DARK_GRAY, font=FONTS["chart_label"])
-    draw.line([(legend_x + 70, legend_y + 9), (legend_x + 90, legend_y + 9)],
-              fill=CHART_CONSUMPTION, width=2)
-    draw.text((legend_x + 96, legend_y), "Verbr.", fill=DARK_GRAY, font=FONTS["chart_label"])
-
-    # Achsen
-    draw.line([(chart_left, chart_bottom), (chart_right, chart_bottom)],
-              fill=CHART_GRID_LINE, width=1)
-    draw.line([(chart_left, chart_top), (chart_left, chart_bottom)],
-              fill=CHART_GRID_LINE, width=1)
-
-
-def _draw_daily_stats(draw: ImageDraw.Draw, data: DashboardData, W: int, y_start: int):
-    """Tageswerte: korrekt aggregiert aus gespeicherten Intervallen."""
-    summary = data.daily_summary
-
-    if summary is None or summary.samples == 0:
-        draw.text((60, y_start + 10), "Keine Tagesdaten",
-                  fill=MID_GRAY, font=FONTS["stats_label"])
-        return
-
-    stats = [
-        ("Produktion", f"{_format_kwh(summary.production_wh)} kWh"),
-        ("Verbrauch", f"{_format_kwh(summary.consumption_wh)} kWh"),
-        ("Eigenverbr.", f"{summary.self_consumption_rate * 100:.0f}%"),
-        ("Autarkie", f"{summary.autarchy_degree * 100:.0f}%"),
-        ("Einspeisung", f"{_format_kwh(summary.export_wh)} kWh"),
-        ("Bezug", f"{_format_kwh(summary.import_wh)} kWh"),
-    ]
-
-    box_w = (W - 120) // len(stats)
-    for i, (label, value) in enumerate(stats):
-        bx = 60 + i * box_w
-        by = y_start
-
-        _rounded_rect(draw, (bx, by, bx + box_w - 10, by + 105),
-                      radius=12, fill=CARD_BG)
-        draw.text((bx + 12, by + 8), label, fill=DARK_GRAY, font=FONTS["small"])
-        draw.text((bx + 12, by + 35), value, fill=BLACK, font=FONTS["stats_value"])
-
-
-def _draw_bottom_row(draw: ImageDraw.Draw, data: DashboardData, W: int,
-                     H: int, y_start: int):
-    """Geräte links, PV-Performance rechts."""
-    mid_x = W // 2
-
-    # --- Geräte (linke Hälfte) ---
-    draw.text((60, y_start), "GERÄTE", fill=DARK_GRAY, font=FONTS["small"])
-    devices = data.devices
-    if devices:
-        dx = 60
-        dy = y_start + 28
-        for dev in devices[:4]:  # Max 4 Geräte anzeigen
-            _rounded_rect(draw, (dx, dy, dx + mid_x - 100, dy + 50),
-                          radius=10, fill=CARD_BG, outline=LIGHT_GRAY)
-            # Status-Punkt
-            color = DARK_GRAY if dev.signal == "connected" else LIGHT_GRAY
-            draw.ellipse((dx + 12, dy + 18, dx + 24, dy + 30), fill=color)
-
-            if dev.power_w > 0:
-                val, unit = _format_power(dev.power_w)
-                text = f"{dev.name}: {val} {unit}"
-                text_color = BLACK
-            elif dev.soc is not None:
-                text = f"{dev.name}: {dev.soc:.0f}%"
-                text_color = BLACK
-            else:
-                text = f"{dev.name}: ---"
-                text_color = MID_GRAY
-            draw.text((dx + 32, dy + 12), text, fill=text_color,
-                      font=FONTS["device_text"])
-            dy += 58
+        if len(con_pts) >= 2:
+            fill_pts = [(con_pts[0][0], chart_bottom), *con_pts,
+                        (con_pts[-1][0], chart_bottom)]
+            draw.polygon(fill_pts, fill=CHART_CON_FILL)
+            draw.line(con_pts, fill=CHART_CON_LINE, width=2)
     else:
-        draw.text((60, y_start + 30), "Keine Geräte",
-                  fill=MID_GRAY, font=FONTS["device_text"])
+        _centered_text(draw, (chart_left + chart_right) / 2,
+                       chart_top + chart_height / 2 - 10,
+                       "Keine Daten", font=FONTS["week_day"], fill=TEXT_MID)
 
-    # --- PV-Performance (rechte Hälfte) ---
-    perf_x = mid_x + 30
-    draw.text((perf_x, y_start), "PV-PERFORMANCE (30 TAGE)", fill=DARK_GRAY,
-              font=FONTS["small"])
+    # Axes
+    draw.line([(chart_left, chart_bottom), (chart_right, chart_bottom)],
+              fill=LINE_DARK, width=1)
+    draw.line([(chart_left, chart_top), (chart_left, chart_bottom)],
+              fill=LINE_DARK, width=1)
+    return panel_bottom
 
-    history = data.daily_history
+
+# ── 7-day history ──────────────────────────────────────────────────
+
+def _draw_week_history(draw: ImageDraw.Draw, data: DashboardData,
+                       panel_left: int, panel_top: int,
+                       panel_right: int, panel_bottom: int) -> None:
+    _rounded_rect(draw, (panel_left, panel_top, panel_right, panel_bottom),
+                  radius=20, fill=FILL_PANEL, outline=LINE_LIGHT)
+
+    history = data.daily_history[-7:]
     if not history:
-        draw.text((perf_x, y_start + 30), "Keine Historie",
-                  fill=MID_GRAY, font=FONTS["device_text"])
+        _centered_text(draw, (panel_left + panel_right) / 2,
+                       (panel_top + panel_bottom) / 2 - 10,
+                       "Noch keine 7-Tage-Historie",
+                       font=FONTS["week_day"], fill=TEXT_MID)
         return
 
-    # Mini-Balkendiagramm
-    bar_y_top = y_start + 30
-    bar_y_bottom = H - 30
-    bar_h = bar_y_bottom - bar_y_top
-    available_w = W - 60 - perf_x
-    bar_w = max(4, min(20, available_w // len(history) - 2))
-    gap = max(1, (available_w - bar_w * len(history)) // max(1, len(history) - 1))
+    if data.live is not None:
+        today_local = _to_local_timestamp(data.live.timestamp).date()
+    else:
+        today_local = datetime.now(_local_timezone()).date()
 
-    max_prod = max((s.production_wh for s in history), default=1)
+    content_left = panel_left + 16
+    content_right = panel_right - 16
+    col_w = (content_right - content_left) / len(history)
+
+    weekday_short = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
     for i, summary in enumerate(history):
-        bx = perf_x + i * (bar_w + gap)
-        ratio = summary.production_wh / max_prod if max_prod > 0 else 0
-        filled_h = max(2, int(bar_h * ratio))
-        bar_top = bar_y_bottom - filled_h
+        x = int(content_left + i * col_w)
 
-        # Balken
-        fill = DARK_GRAY if ratio > 0.5 else MID_GRAY
-        draw.rectangle([(bx, bar_top), (bx + bar_w, bar_y_bottom)], fill=fill)
+        if i > 0:
+            draw.line([(x, panel_top + 14), (x, panel_bottom - 14)],
+                      fill=LINE_LIGHT, width=1)
 
+        tx = x + 18
+
+        # Day label
+        if summary.local_date == today_local:
+            day_label = "Heute"
+        else:
+            day_label = weekday_short[summary.local_date.weekday()]
+        draw.text((tx, panel_top + 22), day_label,
+                  fill=TEXT_MID, font=FONTS["week_day"])
+
+        # Production
+        prod = f"{_format_kwh(summary.production_wh)} kWh"
+        draw.text((tx, panel_top + 62), prod,
+                  fill=TEXT_DARK, font=FONTS["week_value_lg"])
+        draw.text((tx, panel_top + 104), "Produktion",
+                  fill=TEXT_LIGHT, font=FONTS["week_label"])
+
+        # Consumption
+        cons = f"{_format_kwh(summary.consumption_wh)} kWh"
+        draw.text((tx, panel_top + 138), cons,
+                  fill=TEXT_MID, font=FONTS["week_value_sm"])
+        draw.text((tx, panel_top + 172), "Verbrauch",
+                  fill=TEXT_LIGHT, font=FONTS["week_label"])
+
+
+# ── Post-processing ───────────────────────────────────────────────
 
 def _quantize_16_grayscale(img: Image.Image) -> Image.Image:
-    """Quantisiere auf 16 Graustufen (4-bit) für E-Ink-Kompatibilität."""
-    import numpy as np
     arr = np.array(img, dtype=np.float32)
-    # 16 Stufen: 0, 17, 34, 51, ..., 238, 255
     arr = np.round(arr / 17) * 17
     arr = np.clip(arr, 0, 255).astype(np.uint8)
     return Image.fromarray(arr, mode="L")
