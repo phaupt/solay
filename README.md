@@ -104,8 +104,6 @@ All settings are configured via environment variables in `.env.local`.
 | `DASHBOARD_LANGUAGE` | Display language: `EN`, `DE`, `FR`, `IT` | `EN` |
 | `TZ` | Timezone | `Europe/Zurich` |
 | `DISPLAY_UPDATE_INTERVAL` | E-paper refresh cadence in seconds | `60` |
-| `DISPLAY_FULL_REFRESH_INTERVAL` | Full GC16 refreshes between partial updates | `1` |
-| `RENDER_INTERVAL_SECONDS` | Dashboard render interval in seconds | `15` |
 
 ### TLS configuration
 

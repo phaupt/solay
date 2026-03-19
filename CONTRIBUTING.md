@@ -67,15 +67,18 @@ The export path renders the same HTML/CSS/SVG dashboard through Playwright and w
 
 ## Regenerating README Screenshots
 
+The README depends on three mock screenshots in `docs/screenshots/`. If they are missing or outdated, regenerate them:
+
 ```bash
 ./.venv312/bin/python scripts/generate_readme_screenshots.py
 ```
 
 ## Documentation Sync
 
-When the architecture or main screen changes, update all three:
+When the architecture or main screen changes, update all four:
 
 - `README.md`
+- `docs/architecture.md`
 - `CLAUDE.md`
 - `.ai/solar-manager-eink-dashboard-context.md`
 
