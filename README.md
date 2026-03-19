@@ -1,9 +1,9 @@
 # Solar E-Ink Dashboard
 
-> A wall-mounted e-paper display for your Solar Manager — shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
+> A wall-mounted e-paper display for your Solar Manager. Shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
 
 <p align="center">
-  <img src="docs/screenshots/hero-product-photo.png" alt="Solar E-Ink Dashboard — Waveshare 7.8 inch e-paper display in a wooden frame" width="720">
+  <img src="docs/screenshots/hero-product-photo.png" alt="Solar E-Ink Dashboard on a Waveshare 7.8 inch e-paper display in a wooden frame" width="720">
 </p>
 
 **What the display shows:**
@@ -32,10 +32,10 @@
 |---|---|
 | Solar Manager gateway | Any gateway exposing the local v2 API (`/v2/stream`, `/v2/point`) |
 | Raspberry Pi 5B | 4 GB RAM is fine as the reference target |
-| Waveshare 7.8" e-Paper HAT | IT8951 controller, 1872×1404, black/white panel with 2–16 grayscale levels |
+| Waveshare 7.8" e-Paper HAT | IT8951 controller, 1872×1404, black/white panel with 2-16 grayscale levels |
 | microSD card | SanDisk Extreme PRO 128 GB (reference card) |
 | Power supply | USB-C, 5V/5A recommended for Pi 5 (5V/3A works only with reduced peripheral budget) |
-| Frame / mount | Your choice — display area is 7.8" diagonal |
+| Frame / mount | Your choice, display area is 7.8" diagonal |
 
 > **Note:** The VCOM voltage is printed on the display's FPC ribbon cable label. You'll need it during setup.
 
@@ -45,13 +45,13 @@
 
 Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash Raspberry Pi OS (64-bit). Enable SSH and configure your Wi-Fi during setup.
 
-The setup script requires `python3.12` — see `scripts/setup-pi.sh` for how it is installed on your OS version.
+The setup script requires `python3.12`. See `scripts/setup-pi.sh` for how it is installed on your OS version.
 
 ### 2. Clone the repo and run setup
 
 ```bash
-git clone https://github.com/phaupt/solar-eink-dashboard.git
-cd solar-eink-dashboard
+git clone https://github.com/phaupt/solay.git
+cd solay
 bash scripts/setup-pi.sh
 ```
 
@@ -67,7 +67,7 @@ EPAPER_VCOM=<from your display FPC label, e.g. -1.48>
 DASHBOARD_LANGUAGE=EN
 ```
 
-Use the **Solar Manager gateway IP**, not the inverter IP. The setup script defaults language to `DE` — change to your preferred language.
+Use the **Solar Manager gateway IP**, not the inverter IP. The setup script defaults language to `DE`. Change to your preferred language.
 
 ### 4. Reboot, then validate the display
 
@@ -216,4 +216,4 @@ SM_LOCAL_TLS_FINGERPRINT_SHA256=<the-fingerprint>
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, educational, and noncommercial use.
+[PolyForm Noncommercial 1.0.0](LICENSE). Free for personal, educational, and noncommercial use.

@@ -82,5 +82,5 @@ When the architecture or main screen changes, update all four:
 
 ## Useful Reference Files
 
-- `tmp/solar-eink-dashboard-PROJECT.md` — full product spec (German)
-- `tmp/Solar Manager API.pdf` — official API docs
+- `tmp/solar-eink-dashboard-PROJECT.md` -full product spec (German)
+- `tmp/Solar Manager API.pdf` -official API docs
