@@ -77,7 +77,7 @@ def test_peak_marker_uses_raw_peak_for_y_scale_not_only_bucket_average():
 
     chart = str(build_dashboard_context(data)["chart_svg"])
 
-    assert 'Peak Production: 10135 W' in chart
+    assert 'Peak Production: 5200 W' in chart
     assert '<line class="chart-peak-line" x1="76.0" y1="10.0"' not in chart
 
 
@@ -174,6 +174,18 @@ def test_flask_preview_scenario_preserves_peak_marker():
     assert response.status_code == 200
     assert "chart-peak-line" in body
     assert "Peak Production: 1221 W" in body
+
+
+def test_flow_active_paths_use_midline_arrow_glyphs():
+    data = DashboardData(
+        live=_make_live(p_w=4200, c_w=1800, bc_w=800, bd_w=0),
+        daily_history=_make_history(),
+    )
+
+    flow_svg = str(build_dashboard_context(data)["flow_svg"])
+
+    assert 'marker-end=' not in flow_svg
+    assert flow_svg.count('class="flow-arrow"') >= 2
 
 
 def test_flask_preview_scenarios_index_lists_links():

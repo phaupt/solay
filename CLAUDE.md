@@ -87,11 +87,13 @@ Optional legacy fallback:
 - **`soc=0` is a valid value** (empty battery). Only `soc is None` means "no battery present".
 - **Current main screen:** live flow + 24h chart + 7-day history. No device list, no PV-performance block, no extra KPI-card section.
 - **The 24h chart includes a peak-production guide derived from the real max production of the current day.**
+- **The peak-production guide must align to the displayed production curve, not a detached raw spike above it.**
 - **7-day history is energy history, so it must use `kWh`, not `kW`.**
 - **Car/EV SOC must not be treated as home battery SOC.**
 - **The 7-day history must always show 7 columns with today on the far right; missing days render as `0.0`.**
 - **Localized weekday labels must stay short enough to avoid wrapping in `EN`, `DE`, `FR`, and `IT`.**
 - **For stale data, prefer a quiet stale marker in the update line over redundant warning text inside the flow panel.**
+- **Active live-flow paths currently use straight connections with centered double arrowheads. Do not revert to curved paths or marker-end arrows unless explicitly asked.**
 - **E-Ink constraints:** 16 grayscale levels, no color, optimize for readability at distance.
 - **Security by design:** No secrets in source, `.env.local` for credentials, dev server on localhost only, no Flask debug mode.
 - **Docs sync matters:** When the architecture or main screen changes, update `README.md`, `.ai/solar-manager-eink-dashboard-context.md`, and this file.

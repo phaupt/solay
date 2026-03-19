@@ -229,6 +229,13 @@ body {
     stroke-width: 6;
 }
 
+.flow-arrow path {
+    fill: var(--flow-active);
+    stroke: var(--panel-bg);
+    stroke-width: 3;
+    paint-order: stroke fill;
+}
+
 .flow-state {
     fill: var(--text-muted);
     font-family: inherit;

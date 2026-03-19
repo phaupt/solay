@@ -22,7 +22,7 @@ _FLOW_KEYS = [
     ("grid", "battery"),
     ("battery", "home"),
 ]
-_STRAIGHT_PATHS = {("solar", "battery"), ("grid", "home")}
+_STRAIGHT_PATHS = set(_FLOW_KEYS)
 
 
 def _local_timezone() -> ZoneInfo:
@@ -223,6 +223,42 @@ def _flow_path_d(
     )
 
 
+def _flow_point_and_angle(
+    key: tuple[str, str],
+    start: tuple[float, float],
+    end: tuple[float, float],
+    center: tuple[float, float],
+    *,
+    t: float = 0.5,
+    is_straight: bool,
+) -> tuple[float, float, float]:
+    if is_straight:
+        mid_x = start[0] + ((end[0] - start[0]) * t)
+        mid_y = start[1] + ((end[1] - start[1]) * t)
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+    else:
+        control_points = {
+            ("solar", "grid"): (center[0] - 124, center[1] - 92),
+            ("solar", "home"): (center[0] + 126, center[1] - 92),
+            ("grid", "battery"): (center[0] - 122, center[1] + 96),
+            ("battery", "home"): (center[0] + 122, center[1] + 96),
+        }
+        cx, cy = control_points.get(key, center)
+        mt = 1 - t
+        mid_x = (mt * mt * start[0]) + (2 * mt * t * cx) + (t * t * end[0])
+        mid_y = (mt * mt * start[1]) + (2 * mt * t * cy) + (t * t * end[1])
+        dx = 2 * mt * (cx - start[0]) + 2 * t * (end[0] - cx)
+        dy = 2 * mt * (cy - start[1]) + 2 * t * (end[1] - cy)
+
+    angle = 0.0
+    if dx or dy:
+        import math
+
+        angle = math.degrees(math.atan2(dy, dx))
+    return mid_x, mid_y, angle
+
+
 def _build_flow_svg(data: DashboardData, language: str) -> Markup:
     width, height = 760, 760
     cx = width / 2
@@ -257,6 +293,7 @@ def _build_flow_svg(data: DashboardData, language: str) -> Markup:
         )
 
     path_markup: list[str] = []
+    arrow_markup: list[str] = []
     for key in _FLOW_KEYS:
         path_d = _flow_path_d(
             key,
@@ -278,8 +315,26 @@ def _build_flow_svg(data: DashboardData, language: str) -> Markup:
                 is_straight=key in _STRAIGHT_PATHS,
             )
             path_markup.append(
-                f'<path class="flow-path flow-path--active" d="{path_d}" marker-end="url(#flow-arrow-active)" />'
+                f'<path class="flow-path flow-path--active" d="{path_d}" />'
             )
+            arrow_x, arrow_y, arrow_angle = _flow_point_and_angle(
+                key,
+                edges[key[0]],
+                edges[key[1]],
+                center,
+                t=0.5,
+                is_straight=key in _STRAIGHT_PATHS,
+            )
+            import math
+
+            offset_dx = math.cos(math.radians(arrow_angle)) * 13
+            offset_dy = math.sin(math.radians(arrow_angle)) * 13
+            for direction in (-1, 1):
+                arrow_markup.append(
+                    f'<g class="flow-arrow" transform="translate({arrow_x + (direction * offset_dx):.1f} {arrow_y + (direction * offset_dy):.1f}) rotate({arrow_angle:.1f})">'
+                    '<path d="M -18 -11 L 5 0 L -18 11 Z" />'
+                    '</g>'
+                )
 
     node_state = _node_state(data, language)
     node_markup: list[str] = []
@@ -309,13 +364,11 @@ def _build_flow_svg(data: DashboardData, language: str) -> Markup:
 
     svg = f"""
     <svg class="flow-svg" viewBox="0 0 {width} {height}" xmlns="{SVG_NS}" role="img" aria-label="{escape(tr(language, 'flow_aria'))}">
-      <defs>
-        <marker id="flow-arrow-active" markerWidth="11" markerHeight="11" refX="7.5" refY="4" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L0,8 L8,4 z" fill="var(--flow-active)" />
-        </marker>
-      </defs>
       <g class="flow-paths">
         {''.join(path_markup)}
+      </g>
+      <g class="flow-arrows">
+        {''.join(arrow_markup)}
       </g>
       <g class="flow-nodes">
         {''.join(node_markup)}
@@ -361,10 +414,10 @@ def _build_chart_svg(data: DashboardData, language: str) -> Markup:
         return plot_left + (plot_width * hours / 24.0)
 
     buckets = data.chart_buckets
+    chart_peak_production_w = max((bucket.p_w_avg for bucket in buckets), default=0.0)
     max_power = max(
-        max((bucket.p_w_avg for bucket in buckets), default=0.0),
+        chart_peak_production_w,
         max((bucket.c_w_avg for bucket in buckets), default=0.0),
-        data.peak_production_w,
     )
     padded_peak = max_power * 1.02
     y_max = max(4000, int(((padded_peak + 1999) // 2000) * 2000))
@@ -409,8 +462,9 @@ def _build_chart_svg(data: DashboardData, language: str) -> Markup:
     consumption_line = _chart_line_path(consumption_points)
     peak_line_markup = ""
     peak_label_markup = ""
-    if data.peak_production_w > 0:
-        peak_y = power_to_y(data.peak_production_w)
+    marker_peak_w = chart_peak_production_w or data.peak_production_w
+    if marker_peak_w > 0:
+        peak_y = power_to_y(marker_peak_w)
         label_y = min(max(plot_top + 18, peak_y - 10), plot_bottom - 8)
         peak_line_markup = (
             f'<line class="chart-peak-line" x1="{plot_left:.1f}" y1="{peak_y:.1f}" '
@@ -418,7 +472,7 @@ def _build_chart_svg(data: DashboardData, language: str) -> Markup:
             f'<circle class="chart-peak-dot" cx="{plot_right:.1f}" cy="{peak_y:.1f}" r="4.5" />'
         )
         peak_label = (
-            f"{tr(language, 'peak_production')}: {_format_watts_label(data.peak_production_w)}"
+            f"{tr(language, 'peak_production')}: {_format_watts_label(marker_peak_w)}"
         )
         peak_label_markup = (
             f'<text class="chart-peak-label" x="{plot_right - 8:.1f}" y="{label_y:.1f}" '

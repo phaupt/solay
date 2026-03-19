@@ -13,8 +13,9 @@ A Raspberry Pi wall dashboard for Solar Manager with a Figma-aligned HTML/CSS/SV
 The current main dashboard contains:
 
 - live flow panel with `Solar`, `Grid`, `Home`, and `Battery`
+- straight live-flow paths with centered double arrowheads on active connections
 - current-day 24h chart for production vs. consumption
-- peak production marker line with current-day max production
+- peak production marker line aligned to the displayed production curve
 - 7-day history strip with `produced` and `consumed`
 - mock preview, state/scenario previews, and live preview from a real Solar Manager gateway
 - optional HTML-to-PNG export path for the E-Ink target
@@ -152,6 +153,7 @@ Notes:
 - `src/renderer.py` still exists as a legacy PNG/Pillow fallback via `/dashboard.png`
 - mock mode and live mode use separate SQLite databases
 - the optional cloud backfill uses `/v1/statistics/gateways/{smId}` and `/v3/users/{smId}/data/range`
+- active live-flow paths currently use straight 45°/orthogonal lines with centered double arrowheads
 
 ## Domain Rules
 
@@ -215,7 +217,7 @@ What is already working:
 - scenario previews for common flow states
 - correct local persistence and current-day aggregation
 - Figma-aligned HTML/CSS/SVG renderer
-- peak-production marker in the 24h chart
+- peak-production marker in the 24h chart aligned to the visible production curve
 - PNG export from the HTML renderer
 - optional i18n for `EN`, `DE`, `FR`, `IT`
 - optional cloud backfill for missing daily history and the current-day startup gap
