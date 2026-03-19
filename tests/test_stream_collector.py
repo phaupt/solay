@@ -61,6 +61,28 @@ class TestPollingFallback:
         finally:
             os.unlink(path)
 
+    def test_process_point_enriches_devices_with_catalog_metadata(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            storage = Storage(db_path=path)
+            client = MagicMock()
+            client.get_devices.return_value = [
+                {"deviceId": "car_01", "type": "car", "name": "Tesla Model Y"},
+            ]
+
+            collector = StreamCollector(storage=storage, client=client)
+            payload = _make_api_response()
+            payload["devices"] = [{"_id": "car_01", "signal": "connected", "soc": 74}]
+
+            collector._process_point(payload)
+
+            assert collector.latest_point is not None
+            assert collector.latest_point.soc is None
+            assert collector.latest_devices[0].device_type == "car"
+        finally:
+            os.unlink(path)
+
     def test_poll_until_stops_when_not_running(self):
         """_poll_until bricht ab wenn _running=False gesetzt wird."""
         fd, path = tempfile.mkstemp(suffix=".db")

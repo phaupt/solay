@@ -14,7 +14,7 @@ import argparse
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import config
@@ -63,21 +63,32 @@ def build_dashboard_data(storage: Storage, collector=None) -> DashboardData:
     return DashboardData(
         live=live,
         chart_buckets=chart_buckets,
+        peak_production_w=max((point.p_w for point in points), default=0.0),
         daily_summary=daily_summary,
         daily_history=daily_history,
         devices=devices,
     )
 
 
-def run_mock_mode(port: int):
-    """Mock-Modus: Separate DB mit Testdaten füllen, dann Browser-Preview."""
+def build_mock_dashboard_data(storage: Storage) -> DashboardData:
     from mock_data import (
+        DESIGN_REVIEW_WEEK_KWH,
         get_mock_devices,
         get_mock_live_point,
         get_mock_review_history,
-        DESIGN_REVIEW_WEEK_KWH,
-        seed_mock_database,
     )
+
+    data = build_dashboard_data(storage)
+    data.devices = get_mock_devices()
+    data.live = get_mock_live_point()
+    data.daily_history = get_mock_review_history()
+    data.history_labels = [label for label, _, _ in DESIGN_REVIEW_WEEK_KWH]
+    return data
+
+
+def run_mock_mode(port: int):
+    """Mock-Modus: Separate DB mit Testdaten füllen, dann Browser-Preview."""
+    from mock_data import seed_mock_database
 
     db_path = config.MOCK_DB_PATH
     # Frische Mock-DB (nie die Live-DB anfassen)
@@ -86,24 +97,34 @@ def run_mock_mode(port: int):
 
     storage = Storage(db_path)
     seed_mock_database(storage)
-
-    mock_devices = get_mock_devices()
     logger.info("Mock-Datenbank bereit: %d Punkte", storage.point_count())
 
     from src.web_preview import start_server
 
     def get_data() -> DashboardData:
-        data = build_dashboard_data(storage)
-        data.devices = mock_devices
-        data.live = get_mock_live_point()
-        data.daily_history = get_mock_review_history()
-        data.history_labels = [label for label, _, _ in DESIGN_REVIEW_WEEK_KWH]
-        return data
+        return build_mock_dashboard_data(storage)
 
     start_server(get_data, port=port)
 
 
-def run_live_mode(port: int):
+def build_live_dashboard_data(storage: Storage, collector) -> DashboardData:
+    return build_dashboard_data(storage, collector=collector)
+
+
+def _maybe_run_cloud_backfill(storage: Storage):
+    from src.api_cloud import optional_backfill
+
+    try:
+        added = optional_backfill(storage)
+    except Exception as exc:
+        logger.warning("Cloud backfill fehlgeschlagen: %s", exc)
+        return
+
+    if added > 0:
+        logger.info("Cloud backfill ergänzt: %d Datenpunkte/Zusammenfassungen", added)
+
+
+def create_live_storage_and_collector():
     """Live-Modus: Stream-Collector → SQLite → Browser-Preview."""
     from src.api_local import LocalApiClient, StreamCollector
 
@@ -116,6 +137,7 @@ def run_live_mode(port: int):
         sys.exit(1)
 
     storage = Storage()
+    _maybe_run_cloud_backfill(storage)
     client = LocalApiClient()
     collector = StreamCollector(storage=storage, client=client)
 
@@ -126,12 +148,39 @@ def run_live_mode(port: int):
     logger.info("Hole initialen Datenpunkt...")
     collector.poll_once()
 
+    return storage, collector
+
+
+def run_live_mode(port: int):
+    """Live-Modus: Stream-Collector → SQLite → Browser-Preview."""
+    storage, collector = create_live_storage_and_collector()
+
     from src.web_preview import start_server
 
     def get_data() -> DashboardData:
-        return build_dashboard_data(storage, collector=collector)
+        return build_live_dashboard_data(storage, collector=collector)
 
     start_server(get_data, port=port)
+
+
+def export_once(mock: bool, output_path: str, theme: str | None = None, lang: str | None = None):
+    from mock_data import seed_mock_database
+    from src.export_dashboard import export_dashboard_png
+
+    if mock:
+        db_path = config.MOCK_DB_PATH
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        storage = Storage(db_path)
+        seed_mock_database(storage)
+        data = build_mock_dashboard_data(storage)
+    else:
+        storage, collector = create_live_storage_and_collector()
+        data = build_live_dashboard_data(storage, collector=collector)
+        collector.stop()
+
+    exported = export_dashboard_png(data, output_path, theme=theme, lang=lang)
+    logger.info("PNG export geschrieben: %s", exported)
 
 
 def main():
@@ -140,7 +189,22 @@ def main():
                         help="Mock-Daten für UI-Entwicklung verwenden")
     parser.add_argument("--port", type=int, default=config.WEB_PORT,
                         help="Web-Preview Port (default: 8080)")
+    parser.add_argument("--export-png", type=str, default="",
+                        help="Dashboard einmalig als PNG exportieren")
+    parser.add_argument("--theme", type=str, default="",
+                        help="Theme override: light|dark")
+    parser.add_argument("--lang", type=str, default="",
+                        help="Language override: en|de|fr|it")
     args = parser.parse_args()
+
+    if args.export_png:
+        export_once(
+            args.mock,
+            args.export_png,
+            theme=args.theme or None,
+            lang=args.lang or None,
+        )
+        return
 
     if args.mock:
         logger.info("Starte im Mock-Modus")

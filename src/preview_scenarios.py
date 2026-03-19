@@ -66,6 +66,7 @@ def apply_preview_scenario(data: DashboardData, scenario: str | None) -> Dashboa
     return DashboardData(
         live=live,
         chart_buckets=data.chart_buckets,
+        peak_production_w=data.peak_production_w,
         daily_summary=data.daily_summary,
         daily_history=data.daily_history,
         history_labels=data.history_labels,

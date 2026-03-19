@@ -70,10 +70,13 @@ Optional legacy fallback:
 - `src/storage.py` — SQLite with WAL mode for concurrent read/write
 - `src/aggregator.py` — Chart bucket averaging and daily Wh summation
 - `src/html_renderer.py` — Primary browser-faithful dashboard renderer
+- `src/dashboard_document.py` — Standalone HTML document rendering for export
+- `src/export_dashboard.py` — PNG export path via Playwright
 - `src/renderer.py` — Legacy PNG/Pillow fallback
 - `src/web_preview.py` — Flask dev server (binds 127.0.0.1 only)
 - `src/preview_scenarios.py` — fixed dashboard state overrides for preview/review
 - `config.py` — All config from env vars, loaded from `.env.local` (git-ignored)
+- `src/api_cloud.py` — optional cloud backfill for missing day history and the current-day startup gap
 
 ## Critical Domain Rules
 
@@ -83,6 +86,12 @@ Optional legacy fallback:
 - **Timezone handling:** All time conversions use `zoneinfo.ZoneInfo(config.TIMEZONE)`. Never use hard-coded UTC offsets. Day boundaries, chart x-axis, and "today" aggregation must respect DST transitions.
 - **`soc=0` is a valid value** (empty battery). Only `soc is None` means "no battery present".
 - **Current main screen:** live flow + 24h chart + 7-day history. No device list, no PV-performance block, no extra KPI-card section.
+- **The 24h chart includes a peak-production guide derived from the real max production of the current day.**
+- **7-day history is energy history, so it must use `kWh`, not `kW`.**
+- **Car/EV SOC must not be treated as home battery SOC.**
+- **The 7-day history must always show 7 columns with today on the far right; missing days render as `0.0`.**
+- **Localized weekday labels must stay short enough to avoid wrapping in `EN`, `DE`, `FR`, and `IT`.**
+- **For stale data, prefer a quiet stale marker in the update line over redundant warning text inside the flow panel.**
 - **E-Ink constraints:** 16 grayscale levels, no color, optimize for readability at distance.
 - **Security by design:** No secrets in source, `.env.local` for credentials, dev server on localhost only, no Flask debug mode.
 - **Docs sync matters:** When the architecture or main screen changes, update `README.md`, `.ai/solar-manager-eink-dashboard-context.md`, and this file.
@@ -93,7 +102,10 @@ All via environment variables or `.env.local` (see `config.py`). Key settings:
 - `SM_LOCAL_BASE_URL` — gateway address (required for live mode)
 - `SM_LOCAL_API_KEY` — optional API key
 - `SM_LOCAL_VERIFY_TLS` / `SM_LOCAL_CA_BUNDLE` / `SM_LOCAL_TLS_FINGERPRINT_SHA256` — TLS options
+- `DASHBOARD_LANGUAGE` — `EN` / `DE` / `FR` / `IT`
 - `TZ` — timezone, default `Europe/Zurich` (used via `zoneinfo.ZoneInfo` throughout)
 - `DB_PATH` — default `solar_dashboard.db`
 - `MOCK_DB_PATH` — default `solar_dashboard_mock.db` (mock mode uses a separate DB, never touches live data)
 - `RAW_RETENTION_DAYS` — default 7
+- `SM_CLOUD_BACKFILL_ENABLED` + `SM_CLOUD_EMAIL` + `SM_CLOUD_PASSWORD` + `SM_CLOUD_SMID` — optional cloud backfill
+- `RENDER_INTERVAL_SECONDS` — default 15

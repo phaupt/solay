@@ -165,6 +165,17 @@ class Storage:
 
         return [self._row_to_daily(row) for row in reversed(rows)]
 
+    def get_daily_summary(self, local_date: date) -> DailySummary | None:
+        """Lade eine einzelne Tages-Zusammenfassung."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM daily_summary WHERE local_date = ?",
+                (local_date.isoformat(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_daily(row)
+
     def cleanup_old_points(self, retention_days: int | None = None):
         """Lösche raw_points älter als retention_days."""
         days = retention_days or config.RAW_RETENTION_DAYS

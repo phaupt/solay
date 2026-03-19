@@ -12,10 +12,10 @@
     --node-ring: #b8b8b0;
     --chart-grid: #e9e8e3;
     --chart-axis: #888881;
-    --chart-pv-fill: rgba(93, 98, 115, 0.10);
-    --chart-pv-line: rgba(82, 86, 101, 0.55);
-    --chart-cons-fill: rgba(187, 192, 206, 0.22);
-    --chart-cons-line: rgba(120, 124, 138, 0.45);
+    --chart-pv-fill: rgba(182, 188, 201, 0.26);
+    --chart-pv-line: rgba(136, 142, 156, 0.72);
+    --chart-cons-fill: rgba(112, 117, 132, 0.28);
+    --chart-cons-line: rgba(72, 77, 90, 0.78);
     --history-separator: #e2e2dc;
     --shadow: 0 24px 64px rgba(0, 0, 0, 0.09);
     --flow-active: var(--line-active);
@@ -35,10 +35,10 @@
     --node-ring: #6b6d72;
     --chart-grid: #2c2f31;
     --chart-axis: #9fa1a6;
-    --chart-pv-fill: rgba(255, 255, 255, 0.18);
-    --chart-pv-line: rgba(255, 255, 255, 0.32);
-    --chart-cons-fill: rgba(255, 255, 255, 0.42);
-    --chart-cons-line: rgba(255, 255, 255, 0.8);
+    --chart-pv-fill: rgba(255, 255, 255, 0.24);
+    --chart-pv-line: rgba(255, 255, 255, 0.46);
+    --chart-cons-fill: rgba(255, 255, 255, 0.48);
+    --chart-cons-line: rgba(255, 255, 255, 0.9);
     --history-separator: #2b2f32;
     --shadow: none;
     --flow-active: #f0f0ec;
@@ -166,6 +166,24 @@ body {
     stroke-width: 1.25;
 }
 
+.chart-peak-line {
+    stroke: var(--chart-pv-line);
+    stroke-width: 2;
+    stroke-dasharray: 2 5;
+    stroke-linecap: round;
+}
+
+.chart-peak-dot {
+    fill: var(--chart-pv-line);
+}
+
+.chart-peak-label {
+    fill: var(--text-muted);
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: 400;
+}
+
 .chart-area {
     stroke: none;
 }
@@ -291,6 +309,7 @@ body {
     flex-direction: column;
     gap: 10px;
     justify-content: center;
+    min-width: 0;
 }
 
 .history-day + .history-day {
@@ -299,9 +318,13 @@ body {
 
 .history-day__name {
     color: var(--text-secondary);
-    font-size: 24px;
-    font-weight: 500;
+    font-size: 34px;
+    font-weight: 600;
     letter-spacing: 0.01em;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
 }
 
 .history-day.is-today .history-day__name {

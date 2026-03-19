@@ -43,6 +43,22 @@ def test_build_dashboard_context_has_expected_sections():
     assert context["week_history"][-1]["produced"]
 
 
+def test_chart_includes_peak_production_marker_and_label():
+    data = DashboardData(
+        live=_make_live(),
+        chart_buckets=[],
+        peak_production_w=1221,
+        daily_history=_make_history(),
+    )
+
+    context = build_dashboard_context(data)
+    chart = str(context["chart_svg"])
+
+    assert "chart-peak-line" in chart
+    assert "chart-peak-label" in chart
+    assert "Peak Production: 1221 W" in chart
+
+
 def test_build_dashboard_context_marks_stale_live_data():
     local_tz = ZoneInfo("Europe/Zurich")
     stale_local = datetime.now(local_tz) - timedelta(minutes=10)
@@ -52,7 +68,7 @@ def test_build_dashboard_context_marks_stale_live_data():
     context = build_dashboard_context(data)
 
     assert "stale" in context["last_update"]
-    assert "Stale live data" in str(context["flow_svg"])
+    assert "Stale live data" not in str(context["flow_svg"])
 
 
 def test_flask_preview_serves_html_dashboard():
@@ -71,6 +87,42 @@ def test_flask_preview_serves_html_dashboard():
     assert "produced" in body
 
 
+def test_build_dashboard_context_pads_week_history_to_seven_days():
+    data = DashboardData(
+        live=_make_live(),
+        daily_history=[
+            DailySummary(local_date=date(2026, 3, 18), production_wh=12000, consumption_wh=5000),
+            DailySummary(local_date=date(2026, 3, 19), production_wh=8000, consumption_wh=3000),
+        ],
+    )
+
+    context = build_dashboard_context(data)
+
+    assert len(context["week_history"]) == 7
+    assert context["week_history"][-1]["label"] == "Today"
+    assert context["week_history"][0]["produced"] == "0.0"
+
+
+def test_build_dashboard_context_supports_localized_literals():
+    data = DashboardData(live=_make_live(), daily_history=_make_history())
+
+    context = build_dashboard_context(data, lang="de")
+
+    assert context["last_update"].startswith("Letztes Update")
+    assert context["produced_label"] == "produziert"
+    assert context["week_history"][-1]["label"] == "Heute"
+
+
+def test_week_history_uses_short_labels_for_french_layout_safety():
+    data = DashboardData(live=_make_live(), daily_history=_make_history())
+
+    context = build_dashboard_context(data, lang="fr")
+
+    labels = [item["label"] for item in context["week_history"]]
+    assert labels[-1] == "Auj."
+    assert all(len(label) <= 5 for label in labels)
+
+
 def test_flask_preview_supports_scenario_override():
     web_preview._get_dashboard_data = lambda: DashboardData(
         live=_make_live(),
@@ -82,7 +134,24 @@ def test_flask_preview_supports_scenario_override():
 
     body = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "unavailable" in body
+    assert "unavailable" not in body
+    assert '<text class="flow-node__sub" x="0" y="66" text-anchor="middle"></text>' in body
+
+
+def test_flask_preview_scenario_preserves_peak_marker():
+    web_preview._get_dashboard_data = lambda: DashboardData(
+        live=_make_live(),
+        peak_production_w=1221,
+        daily_history=_make_history(),
+    )
+    client = web_preview.app.test_client()
+
+    response = client.get("/?scenario=pv_surplus")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "chart-peak-line" in body
+    assert "Peak Production: 1221 W" in body
 
 
 def test_flask_preview_scenarios_index_lists_links():
@@ -119,14 +188,14 @@ def test_mock_live_reference_matches_figma_state():
     assert point.grid_w > 0
 
 
-def test_battery_icon_uses_discrete_quarter_fill_levels():
+def test_battery_icon_fill_tracks_soc_more_granularly():
     data = DashboardData(live=_make_live(soc=84), daily_history=_make_history())
 
     context = build_dashboard_context(data)
     svg = str(context["flow_svg"])
 
-    assert "flow-node__icon-battery-fill--level-3" in svg
-    assert 'width="24.0"' in svg
+    assert "flow-node__icon-battery-fill" in svg
+    assert 'width="26.9"' in svg
 
 
 def test_battery_icon_renders_empty_when_soc_is_zero():
@@ -135,5 +204,5 @@ def test_battery_icon_renders_empty_when_soc_is_zero():
     context = build_dashboard_context(data)
     svg = str(context["flow_svg"])
 
-    assert "flow-node__icon-battery-fill--level-0" in svg
+    assert "flow-node__icon-battery-fill" in svg
     assert 'width="0.0"' in svg

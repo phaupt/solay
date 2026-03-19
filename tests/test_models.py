@@ -44,13 +44,54 @@ class TestSensorPointFromApi:
             "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
             "devices": [
                 {"_id": "wallbox_01", "signal": "connected", "power": 0},
-                {"_id": "battery_01", "signal": "connected", "power": 2000, "soc": 72},
+                {
+                    "_id": "battery_01",
+                    "signal": "connected",
+                    "power": 2000,
+                    "soc": 72,
+                    "type": "battery",
+                },
             ],
         }
         point = SensorPoint.from_api(data)
         assert point.soc == 72.0
         assert point.has_battery
         assert point.bc_w == 2000
+
+    def test_car_soc_is_not_treated_as_home_battery(self):
+        data = {
+            "t": "2026-03-18T12:00:00Z",
+            "cW": 1000, "pW": 5000,
+            "bcW": 0, "bdW": 0,
+            "cWh": 0, "pWh": 0, "bcWh": 0, "bdWh": 0,
+            "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
+            "devices": [
+                {
+                    "_id": "car_01",
+                    "signal": "connected",
+                    "power": 0,
+                    "soc": 74,
+                    "type": "car",
+                    "name": "Tesla Model Y",
+                },
+            ],
+        }
+        point = SensorPoint.from_api(data)
+        assert point.soc is None
+        assert not point.has_battery
+
+    def test_top_level_soc_is_respected_for_cloud_range_points(self):
+        data = {
+            "t": "2026-03-18T12:00:00Z",
+            "cW": 1000, "pW": 5000,
+            "bcW": 800, "bdW": 0,
+            "cWh": 0, "pWh": 0, "bcWh": 0, "bdWh": 0,
+            "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
+            "soc": 44,
+        }
+        point = SensorPoint.from_api(data)
+        assert point.soc == 44.0
+        assert point.has_battery
 
     def test_soc_zero_is_valid(self):
         """SOC=0 ist ein valider Wert (leere Batterie), nicht 'keine Batterie'."""
@@ -61,7 +102,7 @@ class TestSensorPointFromApi:
             "cWh": 0, "pWh": 0, "bcWh": 0, "bdWh": 0,
             "scWh": 0, "cPvWh": 0, "iWh": 0, "eWh": 0,
             "devices": [
-                {"_id": "battery_01", "signal": "connected", "power": 0, "soc": 0},
+                {"_id": "battery_01", "signal": "connected", "power": 0, "soc": 0, "type": "battery"},
             ],
         }
         point = SensorPoint.from_api(data)

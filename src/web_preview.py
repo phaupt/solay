@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from flask import Flask, Response, request, render_template, url_for
+from flask import Flask, Response, request, url_for
 
 import config
+from src.dashboard_document import render_dashboard_html
 from src.html_renderer import build_dashboard_context
 from src.models import DashboardData
 from src.preview_scenarios import SCENARIO_LABELS, apply_preview_scenario
@@ -28,10 +29,11 @@ def _require_dashboard_data() -> DashboardData:
 @app.route("/")
 def index():
     theme = request.args.get("theme")
+    lang = request.args.get("lang")
     scenario = request.args.get("scenario")
     try:
         data = apply_preview_scenario(_require_dashboard_data(), scenario)
-        context = build_dashboard_context(data, theme=theme)
+        context = build_dashboard_context(data, theme=theme, lang=lang)
     except Exception as exc:  # pragma: no cover - defensive preview fallback
         logger.exception("Preview rendering failed")
         return Response(
@@ -42,7 +44,13 @@ def index():
             status=500,
             mimetype="text/html",
         )
-    return render_template("dashboard.html", **context)
+    return Response(
+        render_dashboard_html(
+            context,
+            stylesheet_href=url_for("static", filename="dashboard.css"),
+        ),
+        mimetype="text/html",
+    )
 
 
 @app.route("/scenarios")

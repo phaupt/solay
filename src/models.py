@@ -9,6 +9,35 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 
+def _normalize_device_text(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _is_home_battery_device(device: dict) -> bool:
+    """Heuristik für echte Hausbatterien.
+
+    Die lokale API liefert in /v2/point nur knappe Device-Objekte. Nach
+    Anreicherung über /v2/devices stehen typischerweise type/name/description
+    zur Verfügung. EV-/Car-SOC darf hier nicht als Hausbatterie interpretiert
+    werden.
+    """
+
+    type_text = _normalize_device_text(device.get("type"))
+    category_text = _normalize_device_text(device.get("category"))
+    name_text = _normalize_device_text(device.get("name"))
+    description_text = _normalize_device_text(device.get("description"))
+    combined = " ".join(
+        part for part in (type_text, category_text, name_text, description_text) if part
+    )
+
+    negative_markers = ("car", "vehicle", "ev", "charger", "wallbox", "tesla")
+    if any(marker in combined for marker in negative_markers) and "v2x" not in combined:
+        return False
+
+    positive_markers = ("battery", "home battery", "hausbatterie", "speicher", "akku", "v2x")
+    return any(marker in combined for marker in positive_markers)
+
+
 @dataclass(frozen=True)
 class SensorPoint:
     """Ein einzelner Datenpunkt vom Solar Manager (Stream oder Point).
@@ -54,14 +83,16 @@ class SensorPoint:
         except (ValueError, AttributeError):
             timestamp = datetime.now().astimezone()
 
-        # SOC aus Devices extrahieren (Batterie-Device hat soc-Feld)
-        # soc=0 ist ein valider Wert (leere Batterie), daher nur auf None prüfen
         soc = None
-        for device in data.get("devices", []):
-            device_soc = device.get("soc")
-            if device_soc is not None:
-                soc = float(device_soc)
-                break
+        top_level_soc = data.get("soc")
+        if top_level_soc is not None:
+            soc = float(top_level_soc)
+        else:
+            for device in data.get("devices", []):
+                device_soc = device.get("soc")
+                if device_soc is not None and _is_home_battery_device(device):
+                    soc = float(device_soc)
+                    break
 
         return cls(
             timestamp=timestamp,
@@ -151,6 +182,7 @@ class DeviceStatus:
 
     device_id: str
     name: str = ""
+    device_type: str = ""
     signal: str = "disconnected"
     power_w: float = 0.0
     soc: float | None = None
@@ -162,6 +194,7 @@ class DeviceStatus:
         return cls(
             device_id=device_id,
             name=data.get("name", device_id),
+            device_type=data.get("type", ""),
             signal=data.get("signal", "disconnected"),
             power_w=float(data.get("power", 0)),
             soc=float(soc_val) if soc_val is not None else None,
@@ -174,6 +207,7 @@ class DashboardData:
 
     live: SensorPoint | None = None
     chart_buckets: list[ChartBucket] = field(default_factory=list)
+    peak_production_w: float = 0.0
     daily_summary: DailySummary | None = None
     daily_history: list[DailySummary] = field(default_factory=list)
     history_labels: list[str] = field(default_factory=list)

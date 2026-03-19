@@ -192,6 +192,8 @@ class StreamCollector:
         self._lock = threading.Lock()
         self._backoff = 1.0  # Initial reconnect delay
         self._last_stream_error: Exception | None = None
+        self._device_metadata: dict[str, dict] = {}
+        self._device_metadata_loaded = False
 
     @property
     def latest_point(self) -> SensorPoint | None:
@@ -277,6 +279,56 @@ class StreamCollector:
             self._last_stream_error = None
             raise err
 
+    def _load_device_metadata(self):
+        if self._device_metadata_loaded:
+            return
+
+        fetch = getattr(self._client, "get_devices", None)
+        if fetch is None:
+            self._device_metadata_loaded = True
+            return
+
+        try:
+            devices = fetch() or []
+        except Exception as exc:
+            logger.debug("Geräte-Metadaten konnten nicht geladen werden: %s", exc)
+            self._device_metadata_loaded = True
+            return
+
+        if not isinstance(devices, list):
+            devices = []
+
+        metadata: dict[str, dict] = {}
+        for device in devices:
+            for key in (
+                device.get("_id"),
+                device.get("deviceId"),
+                device.get("data_id"),
+                device.get("sensorId"),
+            ):
+                if key:
+                    metadata[str(key)] = dict(device)
+        self._device_metadata = metadata
+        self._device_metadata_loaded = True
+
+    def _enrich_devices(self, devices: list[dict]) -> list[dict]:
+        self._load_device_metadata()
+        if not self._device_metadata:
+            return [dict(device) for device in devices]
+
+        enriched: list[dict] = []
+        for device in devices:
+            device_id = (
+                device.get("_id")
+                or device.get("deviceId")
+                or device.get("data_id")
+                or device.get("sensorId")
+            )
+            merged = dict(self._device_metadata.get(str(device_id), {}))
+            merged.update(device)
+            enriched.append(merged)
+        return enriched
+
     def _on_ws_open(self, ws):
         try:
             self._verify_websocket_peer_certificate(ws)
@@ -327,8 +379,10 @@ class StreamCollector:
 
     def _process_point(self, data: dict, source: str = "local_stream"):
         """Verarbeite einen API-Datenpunkt: parse, speichere, benachrichtige."""
-        point = SensorPoint.from_api(data)
-        devices = [DeviceStatus.from_api(d) for d in data.get("devices", [])]
+        enriched_payload = dict(data)
+        enriched_payload["devices"] = self._enrich_devices(data.get("devices", []))
+        point = SensorPoint.from_api(enriched_payload)
+        devices = [DeviceStatus.from_api(d) for d in enriched_payload["devices"]]
 
         # In-Memory aktualisieren
         with self._lock:
@@ -336,7 +390,7 @@ class StreamCollector:
             self._latest_devices = devices
 
         # In DB speichern
-        devices_json = json.dumps(data.get("devices", []))
+        devices_json = json.dumps(enriched_payload["devices"])
         self._storage.store_point(point, source=source, devices_json=devices_json)
 
         # Callback

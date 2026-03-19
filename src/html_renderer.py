@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import escape
 from zoneinfo import ZoneInfo
 
@@ -10,10 +10,10 @@ from markupsafe import Markup
 
 import config
 from src.flow_logic import FLOW_THRESHOLD_W, determine_flow_active
+from src.i18n import normalize_language, today_short, tr, weekday_short_name
 from src.models import DashboardData
 
 SVG_NS = "http://www.w3.org/2000/svg"
-_WEEKDAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _FLOW_KEYS = [
     ("solar", "home"),
     ("solar", "grid"),
@@ -41,6 +41,10 @@ def _resolved_theme(theme: str | None) -> str:
     return candidate if candidate in {"light", "dark"} else "light"
 
 
+def _resolved_language(language: str | None) -> str:
+    return normalize_language(language or config.DASHBOARD_LANGUAGE)
+
+
 def _format_kw_value(watts: float) -> str:
     kw = abs(watts) / 1000
     if kw < 0.01:
@@ -66,6 +70,10 @@ def _format_kwh(wh: float) -> str:
     return f"{kwh:.1f}"
 
 
+def _format_watts_label(watts: float) -> str:
+    return f"{int(round(max(0.0, watts)))} W"
+
+
 def _is_live_stale(data: DashboardData) -> bool:
     if data.live is None:
         return False
@@ -73,10 +81,10 @@ def _is_live_stale(data: DashboardData) -> bool:
     return delta.total_seconds() > config.STALE_DATA_SECONDS
 
 
-def _battery_secondary(data: DashboardData) -> tuple[str, str, bool]:
+def _battery_secondary(data: DashboardData, language: str) -> tuple[str, str, bool]:
     live = data.live
     if live is None or not live.has_battery:
-        return "\u2014", "unavailable", True
+        return "\u2014", "", True
 
     primary = _format_kw_value(max(live.bc_w, live.bd_w))
 
@@ -89,24 +97,23 @@ def _battery_secondary(data: DashboardData) -> tuple[str, str, bool]:
     return primary, secondary, False
 
 
-def _battery_fill_level(soc: float | None) -> int:
+def _battery_fill_ratio(soc: float | None) -> float:
     if soc is None:
-        return 0
-    clamped = max(0.0, min(100.0, soc))
-    return min(4, int((clamped + 12.5) // 25))
+        return 0.0
+    return max(0.0, min(1.0, soc / 100.0))
 
 
-def _node_state(data: DashboardData) -> dict[str, dict[str, object]]:
+def _node_state(data: DashboardData, language: str) -> dict[str, dict[str, object]]:
     live = data.live
     if live is None:
         return {
-            "solar": {"label": "Solar", "value": "\u2014", "sub": "no live data", "dimmed": True},
-            "grid": {"label": "Grid", "value": "\u2014", "sub": "no live data", "dimmed": True},
-            "home": {"label": "Home", "value": "\u2014", "sub": "no live data", "dimmed": True},
-            "battery": {"label": "Battery", "value": "\u2014", "sub": "unavailable", "dimmed": True},
+            "solar": {"label": "Solar", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "grid": {"label": "Grid", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "home": {"label": "Home", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "battery": {"label": "Battery", "value": "\u2014", "sub": tr(language, "unavailable"), "dimmed": True},
         }
 
-    battery_value, battery_sub, battery_dimmed = _battery_secondary(data)
+    battery_value, battery_sub, battery_dimmed = _battery_secondary(data, language)
     stale = _is_live_stale(data)
     return {
         "solar": {
@@ -172,13 +179,13 @@ def _icon_markup(kind: str, *, battery_soc: float | None = None) -> str:
         </g>
         """
     if kind == "battery":
-        level = _battery_fill_level(battery_soc)
+        fill_ratio = _battery_fill_ratio(battery_soc)
         max_fill_width = 32.0
-        fill_width = (max_fill_width / 4.0) * level
+        fill_width = max_fill_width * fill_ratio
         return f"""
         <g class="flow-node__icon-shape" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <rect class="flow-node__icon-battery-track" x="-17" y="-7" width="32" height="14" rx="3.4"></rect>
-          <rect class="flow-node__icon-battery-fill flow-node__icon-battery-fill--level-{level}" x="-17" y="-7" width="{fill_width:.1f}" height="14" rx="3.4"></rect>
+          <rect class="flow-node__icon-battery-fill" x="-17" y="-7" width="{fill_width:.1f}" height="14" rx="3.4"></rect>
           <rect x="-21" y="-11" width="42" height="22" rx="5"></rect>
           <line x1="21" y1="-4" x2="28" y2="-4"></line>
           <line x1="21" y1="4" x2="28" y2="4"></line>
@@ -216,7 +223,7 @@ def _flow_path_d(
     )
 
 
-def _build_flow_svg(data: DashboardData) -> Markup:
+def _build_flow_svg(data: DashboardData, language: str) -> Markup:
     width, height = 760, 760
     cx = width / 2
     radius = 98
@@ -274,7 +281,7 @@ def _build_flow_svg(data: DashboardData) -> Markup:
                 f'<path class="flow-path flow-path--active" d="{path_d}" marker-end="url(#flow-arrow-active)" />'
             )
 
-    node_state = _node_state(data)
+    node_state = _node_state(data, language)
     node_markup: list[str] = []
     for kind, (x, y) in positions.items():
         state = node_state[kind]
@@ -297,16 +304,11 @@ def _build_flow_svg(data: DashboardData) -> Markup:
     if data.live is None:
         status_markup = (
             '<text class="flow-state flow-state--offline" x="380" y="736" text-anchor="middle">'
-            "No live data</text>"
-        )
-    elif stale:
-        status_markup = (
-            '<text class="flow-state flow-state--stale" x="380" y="736" text-anchor="middle">'
-            "Stale live data</text>"
+            f"{escape(tr(language, 'no_live_data'))}</text>"
         )
 
     svg = f"""
-    <svg class="flow-svg" viewBox="0 0 {width} {height}" xmlns="{SVG_NS}" role="img" aria-label="Live energy flow">
+    <svg class="flow-svg" viewBox="0 0 {width} {height}" xmlns="{SVG_NS}" role="img" aria-label="{escape(tr(language, 'flow_aria'))}">
       <defs>
         <marker id="flow-arrow-active" markerWidth="11" markerHeight="11" refX="7.5" refY="4" orient="auto" markerUnits="strokeWidth">
           <path d="M0,0 L0,8 L8,4 z" fill="var(--flow-active)" />
@@ -344,7 +346,7 @@ def _chart_line_path(points: list[tuple[float, float]]) -> str:
     return " ".join(segments)
 
 
-def _build_chart_svg(data: DashboardData) -> Markup:
+def _build_chart_svg(data: DashboardData, language: str) -> Markup:
     width, height = 760, 840
     left_pad, right_pad = 76, 10
     top_pad, bottom_pad = 10, 34
@@ -404,23 +406,42 @@ def _build_chart_svg(data: DashboardData) -> Markup:
     consumption_area = _chart_area_path(consumption_points, plot_bottom)
     production_line = _chart_line_path(production_points)
     consumption_line = _chart_line_path(consumption_points)
+    peak_line_markup = ""
+    peak_label_markup = ""
+    if data.peak_production_w > 0:
+        peak_y = power_to_y(data.peak_production_w)
+        label_y = min(max(plot_top + 18, peak_y - 10), plot_bottom - 8)
+        peak_line_markup = (
+            f'<line class="chart-peak-line" x1="{plot_left:.1f}" y1="{peak_y:.1f}" '
+            f'x2="{plot_right:.1f}" y2="{peak_y:.1f}" />'
+            f'<circle class="chart-peak-dot" cx="{plot_right:.1f}" cy="{peak_y:.1f}" r="4.5" />'
+        )
+        peak_label = (
+            f"{tr(language, 'peak_production')}: {_format_watts_label(data.peak_production_w)}"
+        )
+        peak_label_markup = (
+            f'<text class="chart-peak-label" x="{plot_right - 8:.1f}" y="{label_y:.1f}" '
+            f'text-anchor="end">{escape(peak_label)}</text>'
+        )
 
     empty_markup = ""
     if not buckets:
         empty_markup = (
             f'<text class="chart-empty" x="{width / 2:.1f}" y="{height / 2:.1f}" text-anchor="middle">'
-            "No current-day data</text>"
+            f"{escape(tr(language, 'current_day_empty'))}</text>"
         )
 
     svg = f"""
-    <svg class="chart-svg" viewBox="0 0 {width} {height}" xmlns="{SVG_NS}" role="img" aria-label="24 hour production and consumption chart">
+    <svg class="chart-svg" viewBox="0 0 {width} {height}" xmlns="{SVG_NS}" role="img" aria-label="{escape(tr(language, 'chart_aria'))}">
       <g class="chart-grid">
         {''.join(grid_lines)}
       </g>
+      {peak_line_markup}
       {f'<path class="chart-area chart-area--production" d="{production_area}" />' if production_area else ''}
       {f'<path class="chart-area chart-area--consumption" d="{consumption_area}" />' if consumption_area else ''}
       {f'<path class="chart-line chart-line--production" d="{production_line}" />' if production_line else ''}
       {f'<path class="chart-line chart-line--consumption" d="{consumption_line}" />' if consumption_line else ''}
+      {peak_label_markup}
       <line class="chart-axis-line" x1="{plot_left:.1f}" y1="{plot_bottom:.1f}" x2="{plot_right:.1f}" y2="{plot_bottom:.1f}" />
       <line class="chart-axis-line" x1="{plot_left:.1f}" y1="{plot_top:.1f}" x2="{plot_left:.1f}" y2="{plot_bottom:.1f}" />
       <g class="chart-x-labels">{''.join(x_labels)}</g>
@@ -430,48 +451,67 @@ def _build_chart_svg(data: DashboardData) -> Markup:
     return Markup(svg)
 
 
-def _week_history_items(data: DashboardData) -> list[dict[str, object]]:
-    history = data.daily_history[-7:]
-    custom_labels = data.history_labels[-7:] if data.history_labels else []
+def _week_history_items(data: DashboardData, language: str) -> list[dict[str, object]]:
+    history_map = {summary.local_date: summary for summary in data.daily_history}
+    custom_labels = data.history_labels[-7:] if len(data.history_labels) >= 7 else []
     if data.live is not None:
         today = _to_local_timestamp(data.live.timestamp).date()
     else:
         today = datetime.now(_local_timezone()).date()
 
+    dates = [today - timedelta(days=offset) for offset in range(6, -1, -1)]
     items: list[dict[str, object]] = []
-    for index, summary in enumerate(history):
-        is_today = summary.local_date == today
-        label = "Today" if is_today else _WEEKDAY_LABELS[summary.local_date.weekday()]
-        if len(custom_labels) == len(history):
+    for index, item_date in enumerate(dates):
+        summary = history_map.get(item_date)
+        produced_wh = summary.production_wh if summary is not None else 0.0
+        consumed_wh = summary.consumption_wh if summary is not None else 0.0
+        is_today = item_date == today
+        label = today_short(language) if is_today else weekday_short_name(language, item_date.weekday())
+        if len(custom_labels) == len(dates):
             label = custom_labels[index]
         items.append(
             {
                 "label": label,
-                "produced": _format_kwh(summary.production_wh),
-                "consumed": _format_kwh(summary.consumption_wh),
-                "is_today": label == "Today",
+                "produced": _format_kwh(produced_wh),
+                "consumed": _format_kwh(consumed_wh),
+                "is_today": is_today,
             }
         )
     return items
 
 
-def build_dashboard_context(data: DashboardData, theme: str | None = None) -> dict[str, object]:
+def build_dashboard_context(
+    data: DashboardData,
+    theme: str | None = None,
+    lang: str | None = None,
+    refresh_seconds: int | None = None,
+) -> dict[str, object]:
     resolved_theme = _resolved_theme(theme)
+    resolved_language = _resolved_language(lang)
     live = data.live
     if live is None:
-        last_update = "No live data"
+        last_update = tr(resolved_language, "no_live_data")
     else:
         local_ts = _to_local_timestamp(live.timestamp)
-        last_update = f"Last update · {local_ts:%H:%M}"
+        last_update = f"{tr(resolved_language, 'last_update')} · {local_ts:%H:%M}"
         if _is_live_stale(data):
-            last_update = f"Last update · {local_ts:%H:%M} · stale"
+            last_update = f"{last_update} · {tr(resolved_language, 'stale')}"
 
     return {
         "theme_default": resolved_theme,
-        "refresh_seconds": config.RENDER_INTERVAL_SECONDS,
-        "chart_svg": _build_chart_svg(data),
-        "flow_svg": _build_flow_svg(data),
-        "week_history": _week_history_items(data),
+        "lang_code": resolved_language,
+        "page_title": tr(resolved_language, "page_title"),
+        "dashboard_aria": tr(resolved_language, "dashboard_aria"),
+        "chart_aria": tr(resolved_language, "chart_aria"),
+        "flow_aria": tr(resolved_language, "flow_aria"),
+        "history_aria": tr(resolved_language, "history_aria"),
+        "produced_label": tr(resolved_language, "produced"),
+        "consumed_label": tr(resolved_language, "consumed"),
+        "history_empty_label": tr(resolved_language, "no_history"),
+        "refresh_seconds": config.RENDER_INTERVAL_SECONDS if refresh_seconds is None else refresh_seconds,
+        "chart_svg": _build_chart_svg(data, resolved_language),
+        "flow_svg": _build_flow_svg(data, resolved_language),
+        "week_history": _week_history_items(data, resolved_language),
         "last_update": last_update,
         "has_history": bool(data.daily_history),
         "display_width": config.DISPLAY_WIDTH,

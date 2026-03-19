@@ -1,20 +1,24 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang_code }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Solar Manager Dashboard Preview</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <title>{{ page_title }}</title>
+    {% if embedded_css %}
+    <style>{{ embedded_css|safe }}</style>
+    {% else %}
+    <link rel="stylesheet" href="{{ stylesheet_href }}">
+    {% endif %}
 </head>
 <body>
     <div class="dashboard-shell">
-        <main class="dashboard" aria-label="Solar Manager dashboard preview">
+        <main class="dashboard" aria-label="{{ dashboard_aria }}">
             <section class="dashboard__top">
-                <section class="panel chart-panel" aria-label="24 hour chart">
+                <section class="panel chart-panel" aria-label="{{ chart_aria }}">
                     <div class="chart-panel__canvas">{{ chart_svg }}</div>
                 </section>
 
-                <section class="panel flow-panel" aria-label="Live energy flow">
+                <section class="panel flow-panel" aria-label="{{ flow_aria }}">
                     <div class="flow-panel__meta">
                         <span class="flow-panel__update">{{ last_update }}</span>
                     </div>
@@ -22,7 +26,7 @@
                 </section>
             </section>
 
-            <section class="panel history-panel" aria-label="7 day history">
+            <section class="panel history-panel" aria-label="{{ history_aria }}">
                 {% if week_history %}
                     <div class="history-grid">
                         {% for day in week_history %}
@@ -33,20 +37,20 @@
                                         <span class="history-metric__number">{{ day.produced }}</span>
                                         <span class="history-metric__unit">kWh</span>
                                     </div>
-                                    <div class="history-metric__label">produced</div>
+                                    <div class="history-metric__label">{{ produced_label }}</div>
                                 </div>
                                 <div class="history-metric">
                                     <div class="history-metric__value">
                                         <span class="history-metric__number">{{ day.consumed }}</span>
                                         <span class="history-metric__unit">kWh</span>
                                     </div>
-                                    <div class="history-metric__label">consumed</div>
+                                    <div class="history-metric__label">{{ consumed_label }}</div>
                                 </div>
                             </article>
                         {% endfor %}
                     </div>
                 {% else %}
-                    <div class="history-empty">No 7-day history yet</div>
+                    <div class="history-empty">{{ history_empty_label }}</div>
                 {% endif %}
             </section>
         </main>
@@ -58,9 +62,11 @@
             const defaultTheme = "{{ theme_default }}";
             root.dataset.theme = defaultTheme;
 
+            {% if refresh_seconds > 0 %}
             window.setInterval(() => {
                 window.location.reload();
             }, {{ refresh_seconds * 1000 }});
+            {% endif %}
 
             if (window.location.hash.includes("figmacapture=")) {
                 const script = document.createElement("script");
