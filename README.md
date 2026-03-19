@@ -2,11 +2,9 @@
 
 > A wall-mounted e-paper display for your Solar Manager — shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
 
-<!-- TODO: Replace with real hardware photo once available -->
-
-![Mock dashboard](docs/screenshots/mock-dashboard-v4.png)
-![No battery scenario](docs/screenshots/mock-dashboard-no-battery-v4.png)
-![PV surplus scenario](docs/screenshots/mock-dashboard-pv-surplus-v4.png)
+<p align="center">
+  <img src="docs/screenshots/hero-product-photo.png" alt="Solar E-Ink Dashboard — Waveshare 7.8 inch e-paper display in a wooden frame" width="720">
+</p>
 
 **What the display shows:**
 
@@ -14,6 +12,19 @@
 - 24-hour production vs. consumption chart with peak marker
 - 7-day energy history (produced and consumed in kWh)
 - Multilingual: English, German, French, Italian
+
+<table>
+  <tr>
+    <td align="center"><strong>Standard</strong></td>
+    <td align="center"><strong>No Battery</strong></td>
+    <td align="center"><strong>PV Surplus</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/mock-dashboard-v4.png" alt="Standard dashboard with battery" width="280"></td>
+    <td><img src="docs/screenshots/mock-dashboard-no-battery-v4.png" alt="Dashboard without battery" width="280"></td>
+    <td><img src="docs/screenshots/mock-dashboard-pv-surplus-v4.png" alt="Dashboard with PV surplus and grid export" width="280"></td>
+  </tr>
+</table>
 
 ## What You Need
 
