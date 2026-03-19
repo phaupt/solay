@@ -39,7 +39,7 @@ Secondary: Developer who wants to extend or contribute. Served by separate files
 
 3. **Quick Start** (5 steps)
 
-   1. **Flash Raspberry Pi OS** — Raspberry Pi OS Bookworm (64-bit); enable SSH and network during Raspberry Pi Imager setup
+   1. **Flash Raspberry Pi OS** — Raspberry Pi OS (64-bit); enable SSH and network during Raspberry Pi Imager setup. The setup script requires `python3.12`; see `scripts/setup-pi.sh` for how it is installed on your OS version.
    2. **Clone and run setup**
       ```bash
       git clone <repo-url>
@@ -84,8 +84,8 @@ Secondary: Developer who wants to extend or contribute. Served by separate files
    - Full env var table (from current README, reformatted)
 
 6. **Cloud Backfill (optional)**
-   - What it does: fills in missing daily history after a restart
-   - When you need it: only if you care about 7-day history continuity after power loss
+   - What it does: fills in missing previous-day history and backfills today's chart gap (the period between midnight and the first local sample after a restart)
+   - When you need it: if you want complete 7-day history after a restart, or if you want today's chart to start from midnight rather than from whenever the Pi booted
    - The env vars (existing content, cleaned up)
 
 7. **Development**
@@ -111,7 +111,7 @@ New file. Content sourced from current README sections that are developer-focuse
 
 - Dev environment setup (already in README, move here as canonical)
 - Running tests (`pytest`, integration tests)
-- Mock mode and full scenario preview list (scenario URLs)
+- Mock mode and the `/scenarios` index page (language matrix + all flow states)
 - Preview and screenshot regeneration
 - Code/doc sync expectations (when architecture changes, update README + CLAUDE.md + context file)
 - PR expectations (if any)
@@ -156,7 +156,7 @@ New file. Content sourced from current README:
 - **Troubleshooting is new** — highest-value addition for makers; doesn't exist today
 - **CLAUDE.md unchanged** — it already has comprehensive developer context and is the AI-facing doc
 - **Dropped `/v2/devices` from BOM** — not currently used by the application; avoid implying it's required
-- **Pi OS version specified** — Bookworm 64-bit required for python3.12 from apt; older/32-bit images will fail
+- **64-bit OS specified** — setup script requires `python3.12`; the README states 64-bit Pi OS without claiming a specific Debian release ships it
 - **Language default mismatch noted** — setup script defaults to `DE`, Quick Start example shows `EN`; made explicit
 - **Display interval is "configurable"** — avoids prose going stale if default changes
 - **`journalctl` command in troubleshooting** — the primary debugging tool for systemd; name it explicitly
