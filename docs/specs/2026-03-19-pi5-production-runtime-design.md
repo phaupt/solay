@@ -111,10 +111,13 @@ renderer manages this as follows:
 - `__init__` starts a dedicated daemon thread running `asyncio.run(_loop())`.
   The `_loop` coroutine launches the browser, creates the page, and then
   blocks on an `asyncio.Queue` waiting for render requests.
-- The synchronous `render()` method posts a `(DashboardData, Future)` tuple
-  to the queue via `loop.call_soon_threadsafe()` and blocks on
-  `future.result(timeout=30)`. The 30-second timeout prevents the main loop
-  from hanging if Chromium becomes unresponsive.
+- The synchronous `render()` method creates a
+  `concurrent.futures.Future[Image.Image]`, posts a `(DashboardData, Future)`
+  tuple to the queue via `loop.call_soon_threadsafe()`, and blocks on
+  `future.result(timeout=30)`. It must be `concurrent.futures.Future`, not
+  `asyncio.Future` — only the former supports blocking `.result(timeout=...)`
+  from a non-async thread. The 30-second timeout prevents the main loop from
+  hanging if Chromium becomes unresponsive.
 - If the future times out, `render()` raises `RendererTimeout`. The production
   loop catches this and logs a warning (same as any renderer failure).
 - `close()` posts a sentinel to the queue, joins the thread (timeout 10s),
@@ -171,7 +174,10 @@ class EpaperDisplay:
 
 ### Implementation notes
 
-- Uses the `IT8951` library (GregDMeyer/IT8951) via pip.
+- Uses the `IT8951` library (GregDMeyer/IT8951). This is **not** a normal
+  `pip install` — the upstream project requires a source install from a
+  cloned repo (`pip install ./[rpi]`) and builds Cython extensions. See
+  the install section below for prerequisites and pinning strategy.
 - `show_full()` converts the `PIL.Image` to the IT8951's expected buffer
   format and issues a full `GC16` (16-level grayscale) display update.
 - `show_partial()` is implemented but **not called by the production loop
@@ -257,6 +263,14 @@ intentional: local re-aggregation runs first (it is authoritative — it has
 all the raw points), then cloud backfill runs for **older** missing days only.
 Since `api_cloud.py` skips days that already have a summary row (line 192),
 the freshly overwritten yesterday row is not re-fetched from cloud.
+
+**Important**: the existing `optional_backfill()` in `api_cloud.py` must
+**not** be called directly from the rollover step. That function also
+backfills the current-day prefix (line 199+), which is only appropriate at
+startup — not on a midnight rollover where the collector is already running.
+The rollover step must use either a new helper that only backfills past-day
+summaries, or a parameterized version of the existing helper with a flag to
+skip current-day prefix backfill (e.g. `optional_backfill(skip_today=True)`).
 
 ### Retention cleanup (throttled)
 
@@ -382,17 +396,24 @@ WantedBy=multi-user.target
 Automates first-time Pi setup:
 
 1. Enable SPI via `raspi-config nonint` or `/boot/firmware/config.txt`.
-2. Install system dependencies (`python3.12`, `libatlas-base-dev`, etc.).
-3. Create venv, install `requirements-pi.txt`.
-4. Install Playwright Chromium (`python -m playwright install chromium`).
-5. Copy `.env.local.example` → `.env.local`, prompt for gateway URL and VCOM.
-6. Install and enable systemd service.
+2. Install system dependencies: `python3.12`, `python3.12-dev`,
+   `libatlas-base-dev`, `gcc`, `make` (compiler toolchain for Cython
+   extensions in IT8951).
+3. Create venv, install `requirements-pi.txt` (see below).
+4. Clone and install IT8951 from source:
+   `git clone https://github.com/GregDMeyer/IT8951.git /tmp/IT8951 &&`
+   `pip install /tmp/IT8951/[rpi]` — this builds the Cython SPI extension.
+   Pin to a specific commit or tag for reproducibility.
+5. Install Playwright Chromium (`python -m playwright install chromium`).
+6. Copy `.env.local.example` → `.env.local`, prompt for gateway URL and VCOM.
+7. Install and enable systemd service.
 
 ### `requirements-pi.txt`
 
-Locked/pinned versions of all runtime dependencies including:
+Locked/pinned versions of all runtime dependencies. IT8951 is **not**
+listed here — it is installed from source in `setup-pi.sh` (step 4) because
+it requires Cython compilation on the target platform. All other deps:
 
-- `IT8951` (display driver)
 - `pillow`, `numpy` (image processing)
 - `requests`, `websocket-client` (data collection)
 - `flask` (optional, only if dev preview is wanted on Pi)
@@ -405,7 +426,7 @@ For first hardware validation before running the full production stack:
 
 - [ ] SPI enabled in `/boot/firmware/config.txt` (`dtparam=spi=on`)
 - [ ] `/dev/spidev0.0` exists and is accessible by the `pi` user
-- [ ] IT8951 library installed (`pip install IT8951`)
+- [ ] IT8951 library installed from source (`pip install ./[rpi]` from cloned repo)
 - [ ] Run `scripts/epaper_test.py` — confirm panel info is read
 - [ ] Note VCOM value from panel ribbon cable label, set in `.env.local`
 - [ ] Display a full-screen test image (GC16) — confirm correct orientation
