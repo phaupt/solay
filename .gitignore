@@ -1,5 +1,6 @@
 # Project
 tmp/
+out/
 .DS_Store
 *.db
 *.db-shm

@@ -8,6 +8,8 @@ Usage:
     python scripts/epaper_test.py --vcom -1.48 --sleep-wake        # test sleep/wake cycle
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 import time
@@ -16,23 +18,26 @@ from pathlib import Path
 # Add repo root to sys.path so project imports work if needed.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-try:
-    from IT8951.display import AutoEPDDisplay
-    from IT8951 import constants
-except ImportError:
-    print(
-        "ERROR: IT8951 library not found.\n"
-        "Install it from source:\n"
-        "  git clone https://github.com/GregDMeyer/IT8951.git\n"
-        "  pip install ./IT8951[rpi]\n"
-    )
-    sys.exit(1)
-
 from PIL import Image
 
 
-def get_display(vcom: float) -> AutoEPDDisplay:
+def _load_it8951():
+    try:
+        from IT8951.display import AutoEPDDisplay
+        from IT8951 import constants
+    except ImportError as exc:
+        raise RuntimeError(
+            "IT8951 library not found.\n"
+            "Install it from source:\n"
+            "  git clone https://github.com/GregDMeyer/IT8951.git\n"
+            "  pip install ./IT8951[rpi]\n"
+        ) from exc
+    return AutoEPDDisplay, constants
+
+
+def get_display(vcom: float):
     """Initialize and return the e-paper display."""
+    AutoEPDDisplay, _ = _load_it8951()
     print(f"Initializing display with VCOM={vcom} ...")
     display = AutoEPDDisplay(vcom=vcom)
     width = display.width
@@ -41,15 +46,16 @@ def get_display(vcom: float) -> AutoEPDDisplay:
     return display
 
 
-def clear_display(display: AutoEPDDisplay) -> None:
+def clear_display(display) -> None:
     """Clear the display to white using GC16."""
     print("Clearing display to white ...")
     display.clear()
     print("Display cleared.")
 
 
-def show_image(display: AutoEPDDisplay, image_path: str) -> None:
+def show_image(display, image_path: str) -> None:
     """Load a PNG, convert to grayscale, resize to display, show via GC16."""
+    _, constants = _load_it8951()
     print(f"Loading image: {image_path}")
     img = Image.open(image_path).convert("L")
     img = img.resize((display.width, display.height))
@@ -60,8 +66,9 @@ def show_image(display: AutoEPDDisplay, image_path: str) -> None:
     print("Image displayed.")
 
 
-def test_partial(display: AutoEPDDisplay) -> None:
+def run_partial_test(display) -> None:
     """Display a 200x200 gray square at (100,100) via DU mode."""
+    _, constants = _load_it8951()
     print("Partial update test: drawing 200x200 gray square at (100,100) via DU ...")
     print("WARNING: DU mode may cause ghosting; a full GC16 clear is needed to remove it.")
 
@@ -71,7 +78,7 @@ def test_partial(display: AutoEPDDisplay) -> None:
     print("Partial update done.")
 
 
-def test_sleep_wake(display: AutoEPDDisplay) -> None:
+def run_sleep_wake_test(display) -> None:
     """Clear, sleep 3 seconds, wake, clear again, sleep."""
     clear_display(display)
 
@@ -115,14 +122,18 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    display = get_display(args.vcom)
+    try:
+        display = get_display(args.vcom)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
 
     if args.image:
         show_image(display, args.image)
     elif args.partial:
-        test_partial(display)
+        run_partial_test(display)
     elif args.sleep_wake:
-        test_sleep_wake(display)
+        run_sleep_wake_test(display)
     else:
         # Default: clear display to white, then sleep.
         clear_display(display)
