@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from src import api_cloud
 from src.models import SensorPoint
@@ -86,3 +87,29 @@ def test_optional_backfill_populates_missing_days_and_today_prefix(monkeypatch):
         assert storage.point_count() >= 2
     finally:
         os.unlink(path)
+
+
+def test_optional_backfill_skip_today_skips_prefix(monkeypatch, tmp_path):
+    """When skip_today=True, optional_backfill must not fetch current-day prefix."""
+    import config
+    monkeypatch.setattr(config, "SM_CLOUD_BACKFILL_ENABLED", True)
+    monkeypatch.setattr(config, "SM_CLOUD_BACKFILL_DAYS", 3)
+
+    from src.storage import Storage
+    storage = Storage(str(tmp_path / "test.db"))
+
+    mock_client = MagicMock()
+    mock_client.configured = True
+    mock_client.get_statistics.return_value = {
+        "production": 5000, "consumption": 3000,
+        "gridImport": 1000, "gridExport": 2000,
+        "selfConsumption": 2000,
+        "batteryCharge": 500, "batteryDischarge": 400,
+    }
+
+    with patch("src.api_cloud.CloudApiClient", return_value=mock_client):
+        from src.api_cloud import optional_backfill
+        optional_backfill(storage, skip_today=True)
+
+    # get_range is the current-day prefix call — must NOT have been called
+    mock_client.get_range.assert_not_called()

@@ -166,7 +166,7 @@ def _summary_from_statistics(local_date: date, payload: dict[str, Any]) -> Daily
     )
 
 
-def optional_backfill(storage: Storage) -> int:
+def optional_backfill(storage: Storage, *, skip_today: bool = False) -> int:
     """Optionally backfill missing daily history and the current-day prefix.
 
     Previous full days are filled via `/v1/statistics/gateways/{smId}`.
@@ -196,22 +196,23 @@ def optional_backfill(storage: Storage) -> int:
         storage.store_daily_summary(_summary_from_statistics(target_date, stats))
         added += 1
 
-    today_points = storage.get_points_for_date(today, tz=tz)
-    day_start_utc, _ = _local_day_bounds(today, tz)
-    prefix_end_utc = min((point.timestamp for point in today_points), default=datetime.now(timezone.utc))
-    if prefix_end_utc > day_start_utc + timedelta(minutes=5):
-        raw_points = client.get_range(
-            day_start_utc,
-            prefix_end_utc,
-            interval_seconds=config.SM_CLOUD_BACKFILL_INTERVAL_SECONDS,
-        )
-        grouped: dict[date, list[SensorPoint]] = defaultdict(list)
-        for item in raw_points:
-            point = SensorPoint.from_api(item)
-            storage.store_point(point, source="cloud_backfill")
-            grouped[point.timestamp.astimezone(tz).date()].append(point)
-        for local_date, points in grouped.items():
-            storage.store_daily_summary(aggregate_daily_summary(points, local_date))
-        added += len(raw_points)
+    if not skip_today:
+        today_points = storage.get_points_for_date(today, tz=tz)
+        day_start_utc, _ = _local_day_bounds(today, tz)
+        prefix_end_utc = min((point.timestamp for point in today_points), default=datetime.now(timezone.utc))
+        if prefix_end_utc > day_start_utc + timedelta(minutes=5):
+            raw_points = client.get_range(
+                day_start_utc,
+                prefix_end_utc,
+                interval_seconds=config.SM_CLOUD_BACKFILL_INTERVAL_SECONDS,
+            )
+            grouped: dict[date, list[SensorPoint]] = defaultdict(list)
+            for item in raw_points:
+                point = SensorPoint.from_api(item)
+                storage.store_point(point, source="cloud_backfill")
+                grouped[point.timestamp.astimezone(tz).date()].append(point)
+            for local_date, points in grouped.items():
+                storage.store_daily_summary(aggregate_daily_summary(points, local_date))
+            added += len(raw_points)
 
     return added
