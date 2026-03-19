@@ -79,12 +79,8 @@ When the architecture or main screen changes, update all four:
 
 - `README.md`
 - `docs/architecture.md`
-- `CLAUDE.md`
-- `.ai/solar-manager-eink-dashboard-context.md`
 
 ## Useful Reference Files
 
 - `tmp/solar-eink-dashboard-PROJECT.md` — full product spec (German)
 - `tmp/Solar Manager API.pdf` — official API docs
-- `.ai/solar-manager-eink-dashboard-context.md` — hard technical constraints
-- `CLAUDE.md` — AI assistant guidance

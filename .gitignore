@@ -1,6 +1,12 @@
 # Project
 .ai/
+.claude/
+.cursor/
 CLAUDE.md
+AGENTS.md
+GEMINI.md
+docs/specs/
+docs/superpowers/
 tmp/
 out/
 .DS_Store
