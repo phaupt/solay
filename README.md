@@ -205,4 +205,4 @@ SM_LOCAL_TLS_FINGERPRINT_SHA256=<the-fingerprint>
 
 ## License
 
-[MIT](LICENSE)
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, educational, and noncommercial use.
