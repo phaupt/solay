@@ -206,11 +206,29 @@ def _make_minimal_dashboard_data():
     )
 
 
+def _has_playwright():
+    """Check if Playwright + Chromium are available."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            pw.chromium.launch().close()
+        return True
+    except Exception:
+        return False
+
+
+_skip_no_playwright = pytest.mark.skipif(
+    not _has_playwright(),
+    reason="Playwright/Chromium not installed — skipping renderer integration tests",
+)
+
+
+@_skip_no_playwright
 class TestPersistentPlaywrightRenderer:
     """Integration tests for PersistentPlaywrightRenderer.
 
-    These tests launch real Chromium — they are slower but validate
-    the full HTML→Image pipeline.
+    These tests launch real Chromium — skipped automatically when
+    Playwright/Chromium is not installed. Not part of the fast unit suite.
     """
 
     def test_render_returns_grayscale_image(self):
@@ -255,6 +273,7 @@ class TestPersistentPlaywrightRenderer:
         renderer.close()  # should not raise
 
 
+@_skip_no_playwright
 class TestOneShotPlaywrightRenderer:
     """Protocol conformance tests for OneShotPlaywrightRenderer."""
 
@@ -845,6 +864,41 @@ class TestProductionLoopSingleCycle:
         loop._run_one_cycle()  # should not raise
 
 
+class TestStartupReconciliation:
+
+    def test_reconcile_reaggregates_yesterday_on_startup(self, mock_deps):
+        """If the service restarts after midnight, yesterday's partial
+        summary must be overwritten from raw points."""
+        storage, collector, renderer, display = mock_deps
+        storage.get_points_for_date.return_value = [MagicMock()]  # has points
+
+        loop = ProductionLoop(storage, collector, renderer, display)
+
+        with patch("src.production.aggregate_daily_summary") as mock_agg:
+            with patch("src.api_cloud.optional_backfill") as mock_backfill:
+                mock_agg.return_value = MagicMock(samples=42)
+                loop._reconcile_yesterday()
+
+        mock_agg.assert_called_once()
+        storage.store_daily_summary.assert_called_once()
+        mock_backfill.assert_called_once()
+        assert mock_backfill.call_args.kwargs.get("skip_today") is True
+
+    def test_reconcile_skips_if_no_points(self, mock_deps):
+        """If there are no raw points for yesterday, don't overwrite."""
+        storage, collector, renderer, display = mock_deps
+        storage.get_points_for_date.return_value = []
+
+        loop = ProductionLoop(storage, collector, renderer, display)
+
+        with patch("src.production.aggregate_daily_summary") as mock_agg:
+            with patch("src.api_cloud.optional_backfill"):
+                loop._reconcile_yesterday()
+
+        mock_agg.assert_not_called()
+        storage.store_daily_summary.assert_not_called()
+
+
 class TestDayRollover:
 
     def test_rollover_reaggregates_yesterday(self, mock_deps):
@@ -980,6 +1034,8 @@ class ProductionLoop:
             "Production loop started (interval=%ds)", config.DISPLAY_UPDATE_INTERVAL
         )
 
+        self._reconcile_yesterday()
+
         try:
             while not self._stopped:
                 cycle_start = time.monotonic()
@@ -1033,6 +1089,31 @@ class ProductionLoop:
                     logger.exception("Display soft-reset also failed")
 
         self._maybe_cleanup()
+
+    def _reconcile_yesterday(self) -> None:
+        """On startup, re-aggregate yesterday if we have raw points for it.
+
+        Handles the case where the service was down at midnight: yesterday's
+        daily_summary row may be partial or missing. Re-aggregation from raw
+        points overwrites it with the correct total. Cloud backfill then fills
+        any older missing days (with skip_today=True so it does not touch the
+        current-day prefix while the collector is already running).
+        """
+        from datetime import timedelta
+        yesterday = self._current_date - timedelta(days=1)
+        try:
+            points = self._storage.get_points_for_date(yesterday, tz=self._tz)
+            if points:
+                summary = aggregate_daily_summary(points, yesterday)
+                self._storage.store_daily_summary(summary)
+                logger.info(
+                    "Startup reconciliation: re-aggregated yesterday (%s), %d samples",
+                    yesterday, summary.samples,
+                )
+        except Exception:
+            logger.exception("Startup reconciliation failed for %s", yesterday)
+
+        _try_backfill(self._storage)
 
     def _check_day_rollover(self) -> None:
         """Finalize yesterday's summary when the date changes."""
@@ -1202,13 +1283,12 @@ Update `main()` to add args and enforce mutual exclusivity:
 ```python
 def main():
     parser = argparse.ArgumentParser(description="Solar E-Ink Dashboard")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--mock", action="store_true",
-                      help="Mock-Daten für UI-Entwicklung verwenden")
-    mode.add_argument("--production", action="store_true",
-                      help="Production mode: collect → render → e-ink display loop")
-    mode.add_argument("--export-png", type=str, default="",
-                      help="Dashboard einmalig als PNG exportieren")
+    parser.add_argument("--mock", action="store_true",
+                        help="Mock-Daten für UI-Entwicklung verwenden")
+    parser.add_argument("--production", action="store_true",
+                        help="Production mode: collect → render → e-ink display loop")
+    parser.add_argument("--export-png", type=str, default="",
+                        help="Dashboard einmalig als PNG exportieren")
     parser.add_argument("--no-display", action="store_true",
                         help="Production mode without e-paper hardware (headless)")
     parser.add_argument("--port", type=int, default=config.WEB_PORT,
@@ -1219,9 +1299,17 @@ def main():
                         help="Language override: en|de|fr|it")
     args = parser.parse_args()
 
+    # --production is mutually exclusive with --mock and bare live mode,
+    # but --mock and --export-png CAN combine (existing documented workflow:
+    # `main.py --mock --export-png out/dashboard.png`).
+    if args.production and args.mock:
+        parser.error("--production and --mock are mutually exclusive")
+    if args.production and args.export_png:
+        parser.error("--production and --export-png are mutually exclusive")
+
     if args.export_png:
         export_once(
-            False, args.export_png,
+            args.mock, args.export_png,
             theme=args.theme or None, lang=args.lang or None,
         )
         return
@@ -1243,10 +1331,8 @@ def main():
         run_live_mode(args.port)
 ```
 
-Note: the existing `--mock` flag on `--export-png` was a positional trick;
-with mutually exclusive groups, keep `--export-png` separate but handle the
-mock export via `export_once(args.mock, ...)` — adjust as needed for the
-existing mock export workflow.
+The `--mock --export-png` combination is preserved (existing README workflow).
+Only `--production` is mutually exclusive with the other modes.
 
 - [ ] **Step 4: Run tests to verify**
 
@@ -1446,7 +1532,7 @@ echo "Installing system dependencies..."
 sudo apt-get update
 sudo apt-get install -y \
     python3.12 python3.12-dev python3.12-venv \
-    gcc make \
+    gcc make cython3 \
     libatlas-base-dev \
     libgbm1 libnss3 libxss1 libasound2
 
@@ -1455,6 +1541,8 @@ echo "Creating Python venv..."
 python3.12 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install -r "$REPO_DIR/requirements-pi.txt"
+# Cython is needed to build IT8951's SPI extension in the next step
+"$VENV_DIR/bin/pip" install cython
 
 # 4. IT8951 from source
 echo "Installing IT8951 from source..."
@@ -1516,7 +1604,11 @@ websocket-client>=1.6
 flask>=3.0
 playwright>=1.40
 jinja2>=3.1
+cython>=3.0
 ```
+
+Note: `cython` is a build-time dependency for IT8951's SPI extension. IT8951
+itself is installed from source in `setup-pi.sh` (not listed here).
 
 - [ ] **Step 4: Commit**
 
