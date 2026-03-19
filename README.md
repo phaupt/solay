@@ -4,9 +4,9 @@ A Raspberry Pi wall dashboard for Solar Manager with a Figma-aligned HTML/CSS/SV
 
 ## Screenshots
 
-![Mock dashboard](docs/screenshots/mock-dashboard-v2.png)
-![No battery scenario](docs/screenshots/mock-dashboard-no-battery-v2.png)
-![PV surplus scenario](docs/screenshots/mock-dashboard-pv-surplus-v2.png)
+![Mock dashboard](docs/screenshots/mock-dashboard-v3.png)
+![No battery scenario](docs/screenshots/mock-dashboard-no-battery-v3.png)
+![PV surplus scenario](docs/screenshots/mock-dashboard-pv-surplus-v3.png)
 
 ## Current Scope
 
