@@ -94,6 +94,7 @@ Optional legacy fallback:
 - **Localized weekday labels must stay short enough to avoid wrapping in `EN`, `DE`, `FR`, and `IT`.**
 - **For stale data, prefer a quiet stale marker in the update line over redundant warning text inside the flow panel.**
 - **Active live-flow paths currently use straight connections with centered double arrowheads. Do not revert to curved paths or marker-end arrows unless explicitly asked.**
+- **README screenshots should be generated from the native export path (`1872x1404`), not from a smaller viewport screenshot, otherwise the layout looks incorrectly scaled down.**
 - **E-Ink constraints:** 16 grayscale levels, no color, optimize for readability at distance.
 - **Security by design:** No secrets in source, `.env.local` for credentials, dev server on localhost only, no Flask debug mode.
 - **Docs sync matters:** When the architecture or main screen changes, update `README.md`, `.ai/solar-manager-eink-dashboard-context.md`, and this file.
