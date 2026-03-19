@@ -1,127 +1,128 @@
 # Solar E-Ink Dashboard
 
-A Raspberry Pi wall dashboard for Solar Manager with a Figma-aligned HTML/CSS/SVG preview, local SQLite history, and a layout optimized for a high-resolution grayscale E-Ink display.
+> A wall-mounted e-paper display for your Solar Manager — shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
 
-## Screenshots
+<!-- TODO: Replace with real hardware photo once available -->
 
 ![Mock dashboard](docs/screenshots/mock-dashboard-v4.png)
 ![No battery scenario](docs/screenshots/mock-dashboard-no-battery-v4.png)
 ![PV surplus scenario](docs/screenshots/mock-dashboard-pv-surplus-v4.png)
 
-## Current Scope
+**What the display shows:**
 
-The current main dashboard contains:
+- Live energy flow between solar, grid, home, and battery
+- 24-hour production vs. consumption chart with peak marker
+- 7-day energy history (produced and consumed in kWh)
+- Multilingual: English, German, French, Italian
 
-- live flow panel with `Solar`, `Grid`, `Home`, and `Battery`
-- straight live-flow paths with centered double arrowheads on active connections
-- current-day 24h chart for production vs. consumption
-- peak production marker line aligned to the displayed production curve
-- 7-day history strip with `produced` and `consumed`
-- mock preview, state/scenario previews, and live preview from a real Solar Manager gateway
-- HTML-to-PNG export path for the E-Ink target
-- production mode with persistent Playwright renderer and IT8951 e-paper display driver
-- optional cloud backfill for missing previous days and the current-day startup gap
-- configurable dashboard language: `EN`, `DE`, `FR`, `IT`
+## What You Need
 
-Not on the current main screen:
+| Part | Specification |
+|---|---|
+| Solar Manager gateway | Any gateway exposing the local v2 API (`/v2/stream`, `/v2/point`) |
+| Raspberry Pi 5B | 4 GB RAM is fine as the reference target |
+| Waveshare 7.8" e-Paper HAT | IT8951 controller, 1872×1404, black/white panel with 2–16 grayscale levels |
+| microSD card | SanDisk Extreme PRO 128 GB (reference card) |
+| Power supply | USB-C, 5V/5A recommended for Pi 5 (5V/3A works only with reduced peripheral budget) |
+| Frame / mount | Your choice — display area is 7.8" diagonal |
 
-- extra KPI cards for import/export/self-consumption/autarky
-- device list
-- PV performance block
+> **Note:** The VCOM voltage is printed on the display's FPC ribbon cable label. You'll need it during setup.
 
-## Preview Modes
+## Quick Start
 
-### Mock preview
+### 1. Flash Raspberry Pi OS
 
-```bash
-./.venv312/bin/python main.py --mock --port 8090
-```
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash Raspberry Pi OS (64-bit). Enable SSH and configure your Wi-Fi during setup.
 
-Open:
+The setup script requires `python3.12` — see `scripts/setup-pi.sh` for how it is installed on your OS version.
 
-- `http://127.0.0.1:8090/` for the default mock dashboard
-- `http://127.0.0.1:8090/scenarios` for common fixed preview states
-
-Supported scenario URLs:
-
-- `/?scenario=pv_surplus`
-- `/?scenario=pv_deficit`
-- `/?scenario=night`
-- `/?scenario=battery_support`
-- `/?scenario=grid_charge`
-- `/?scenario=no_battery`
-- `/?scenario=stale`
-
-These scenario previews keep the same 24h chart context, including the peak-production marker.
-
-### Live preview
+### 2. Clone the repo and run setup
 
 ```bash
-./.venv312/bin/python main.py --port 8080
+git clone https://github.com/phaupt/solar-eink-dashboard.git
+cd solar-eink-dashboard
+bash scripts/setup-pi.sh
 ```
 
-Open:
+This installs system dependencies, creates a Python virtual environment, installs the IT8951 display driver, sets up Playwright, and registers the systemd service.
 
-- `http://127.0.0.1:8080/`
+### 3. Edit `.env.local`
 
-Live mode uses your local Solar Manager gateway data via `/v2/stream`, with `/v2/point` as fallback.
-The browser preview auto-refreshes every 15 seconds.
-
-### PNG export
-
-```bash
-./.venv312/bin/python main.py --mock --export-png out/dashboard.png
-./.venv312/bin/python main.py --export-png out/live-dashboard.png
-```
-
-The export path renders the same HTML/CSS/SVG dashboard through Playwright and writes a PNG at `1872x1404`.
-By default, the output is quantized to 16 grayscale levels for the E-Ink target.
-
-### Production mode (Raspberry Pi)
-
-```bash
-# Full production loop: collect → render → e-paper display
-./.venv312/bin/python main.py --production
-
-# Headless (render loop without e-paper hardware, for testing)
-./.venv312/bin/python main.py --production --no-display
-```
-
-Production mode runs a timer-based loop that collects data, renders the dashboard via a persistent Playwright instance, and pushes the grayscale PNG to the IT8951 e-paper display. Includes day-rollover detection with re-aggregation, startup reconciliation for yesterday's summary, hourly retention cleanup, and graceful shutdown on SIGTERM/SIGINT.
-
-Requires `EPAPER_VCOM` in `.env.local` (check the FPC cable label on the display panel).
-
-## Local Configuration
-
-Create a local `.env.local` in the repo root. This file stays out of git.
-
-Example:
+The setup script creates `.env.local` in the repo root. Open it and set your values:
 
 ```dotenv
-SM_LOCAL_BASE_URL=https://192.168.1.95
-SM_LOCAL_API_KEY=your-local-api-key
-SM_LOCAL_VERIFY_TLS=false
+SM_LOCAL_BASE_URL=https://<your-gateway-ip>
+EPAPER_VCOM=<from your display FPC label, e.g. -1.48>
 DASHBOARD_LANGUAGE=EN
-SM_CLOUD_BACKFILL_ENABLED=false
-TZ=Europe/Zurich
-WEB_HOST=127.0.0.1
-WEB_PORT=8080
 ```
 
-Important:
+Use the **Solar Manager gateway IP**, not the inverter IP. The setup script defaults language to `DE` — change to your preferred language.
 
-- use the Solar Manager gateway IP, not the inverter IP
-- prefer `https`
-- TLS verification is enabled by default; for gateways with self-signed certs, prefer one of:
-  - `SM_LOCAL_TLS_FINGERPRINT_SHA256=...` (recommended — pin to the gateway cert)
-  - `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem` (if you have a local CA)
-  - `SM_LOCAL_VERIFY_TLS=false` (last resort — disables all TLS checks)
-- `DASHBOARD_LANGUAGE` supports `EN` (default), `DE`, `FR`, `IT`
+### 4. Reboot, then validate the display
 
-### Optional cloud backfill
+```bash
+sudo reboot
+```
 
-The local gateway API has no historical backfill endpoint.
-If you want missing daily history after a restart, configure the optional cloud backfill:
+After reboot, test the e-paper display:
+
+```bash
+cd solar-eink-dashboard
+./.venv312/bin/python scripts/epaper_test.py --vcom <your-vcom>
+```
+
+You should see a test pattern on the display.
+
+### 5. Start the dashboard
+
+```bash
+sudo systemctl start solar-dashboard
+sudo systemctl status solar-dashboard
+```
+
+The dashboard should now be collecting data and updating the display. The service auto-starts on boot (configured by the setup script).
+
+## How It Works
+
+```
+Solar Manager gateway → local collector → SQLite → HTML renderer → Playwright PNG → e-paper display
+```
+
+The Pi connects to the Solar Manager gateway on your LAN via WebSocket, collects live energy data, and stores it in a local SQLite database. A rendering pipeline converts the dashboard to HTML, screenshots it to a grayscale PNG via Playwright, and pushes it to the e-paper display periodically (default: every 60 seconds, configurable via `DISPLAY_UPDATE_INTERVAL`).
+
+## Configuration
+
+All settings are configured via environment variables in `.env.local`.
+
+### Key settings
+
+| Variable | Description | Default |
+|---|---|---|
+| `SM_LOCAL_BASE_URL` | Solar Manager gateway address | `http://192.168.1.XXX` |
+| `SM_LOCAL_API_KEY` | Optional gateway API key | (empty) |
+| `EPAPER_VCOM` | VCOM voltage from display FPC label (required for production) | (empty) |
+| `DASHBOARD_LANGUAGE` | Display language: `EN`, `DE`, `FR`, `IT` | `EN` |
+| `TZ` | Timezone | `Europe/Zurich` |
+| `DISPLAY_UPDATE_INTERVAL` | E-paper refresh cadence in seconds | `60` |
+| `DISPLAY_FULL_REFRESH_INTERVAL` | Full GC16 refreshes between partial updates | `1` |
+| `RENDER_INTERVAL_SECONDS` | Dashboard render interval in seconds | `15` |
+
+### TLS configuration
+
+TLS verification is enabled by default. For gateways with self-signed certificates, choose one (in order of preference):
+
+1. **Certificate pinning (recommended):** `SM_LOCAL_TLS_FINGERPRINT_SHA256=<sha256-fingerprint>`
+2. **Custom CA bundle:** `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem`
+3. **Disable verification (last resort):** `SM_LOCAL_VERIFY_TLS=false`
+
+## Cloud Backfill (optional)
+
+The local gateway has no historical data endpoint. If you restart the Pi, the 7-day history chart will have gaps. The optional cloud backfill fills in:
+
+- **Previous days:** missing daily summaries from before the restart
+- **Today's gap:** the period between midnight and whenever the Pi first started collecting
+
+To enable it, add to `.env.local`:
 
 ```dotenv
 SM_CLOUD_BACKFILL_ENABLED=true
@@ -132,146 +133,78 @@ SM_CLOUD_BACKFILL_DAYS=7
 SM_CLOUD_BACKFILL_INTERVAL_SECONDS=300
 ```
 
-Current behavior:
-
-- previous full days are backfilled into `daily_summary`
-- the current-day gap before the first local sample is backfilled into `raw_points`
-- this avoids double counting once the local stream is running
-
-## Architecture
-
-The current architecture is:
-
-```text
-Solar Manager Gateway
-  ├── /v2/stream  (primary live source)
-  └── /v2/point   (fallback snapshot)
-          ↓
-src/api_local.py
-          ↓
-src/storage.py      SQLite WAL
-          ↓
-src/aggregator.py   chart buckets + daily summaries
-          ↓
-src/models.py       DashboardData
-          ↓
-src/html_renderer.py
-          ↓
-┌─────────┼──────────────────┐
-│         │                  │
-web_preview.py  renderer_png.py    export_dashboard.py
-(Flask dev)     (Playwright PNG)   (one-shot export)
-                     ↓
-                epaper.py (IT8951)
-                     ↓
-                production.py (timer loop)
-```
-
-Notes:
-
-- the HTML/CSS/SVG renderer is the primary visual path
-- `src/renderer.py` still exists as a legacy PNG/Pillow fallback via `/dashboard.png`
-- mock mode and live mode use separate SQLite databases
-- the optional cloud backfill uses `/v1/statistics/gateways/{smId}` and `/v3/users/{smId}/data/range`
-- active live-flow paths currently use straight 45°/orthogonal lines with centered double arrowheads
-
-## Domain Rules
-
-- local `Wh` values are interval values, not daily totals
-- daily totals must be summed from all interval `Wh` samples
-- `/v2/stream` is the correct primary source for intraday charting
-- battery-aware grid power is:
-
-```text
-grid_w = c_w + bc_w - p_w - bd_w
-```
-
-Semantics:
-
-- positive `grid_w` = import / Bezug
-- negative `grid_w` = export / Einspeisung
-- the 7-day history strip shows daily **energy**, so the correct unit is `kWh`, not `kW`
-- EV/car `soc` must not be mistaken for a home battery SOC in the live battery node
-
-## Hardware Target
-
-Reference target:
-
-- Raspberry Pi 5B
-- Waveshare 7.8" e-Paper HAT with IT8951 controller
-- resolution target: `1872x1404`
-
-The full pipeline is implemented: collect → persist → aggregate → render (HTML/CSS/SVG) → screenshot (Playwright) → quantize (16 grayscale) → display (IT8951 GC16).
-
-### Pi deployment
-
-```bash
-# First-time setup (SPI, venv, IT8951, Playwright, systemd)
-bash scripts/setup-pi.sh
-
-# Hardware validation
-./.venv312/bin/python scripts/epaper_test.py --vcom -1.48
-
-# Start production service
-sudo systemctl start solar-dashboard
-```
-
 ## Development
 
-Setup (dev machine):
+For local development without hardware:
 
 ```bash
+# Setup (dev machine)
 python3.12 -m venv .venv312
 ./.venv312/bin/pip install -r requirements.txt
 ./.venv312/bin/python -m playwright install chromium
+
+# Run with mock data
+./.venv312/bin/python main.py --mock --port 8090
 ```
 
-Setup (Raspberry Pi):
+Open `http://127.0.0.1:8090/` for the mock dashboard or `http://127.0.0.1:8090/scenarios` for the scenario matrix.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full developer workflow, testing, and preview modes.
+
+## Troubleshooting
+
+### Display not detected after setup
+
+**Symptom:** `epaper_test.py` fails with a device error.
+**Cause:** SPI was just enabled and needs a reboot.
+**Fix:**
 ```bash
-bash scripts/setup-pi.sh
+sudo reboot
 ```
 
-Tests:
+### Garbled or faint display
 
+**Symptom:** Display shows noise or very faint image.
+**Cause:** Wrong VCOM voltage.
+**Fix:** Check the FPC ribbon cable label on your display panel and update `EPAPER_VCOM` in `.env.local` to match (e.g. `-1.48`). Then restart:
 ```bash
-./.venv312/bin/pytest -q
-RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -v
+sudo systemctl restart solar-dashboard
 ```
 
-Regenerate README screenshots:
+### Gateway not found
 
+**Symptom:** Dashboard shows no data or connection errors in logs.
+**Cause:** Wrong IP address, firewall blocking, or using the inverter IP instead of the gateway IP.
+**Fix:**
+1. Verify the IP is your **Solar Manager gateway**, not the inverter
+2. Test connectivity: `curl -k https://<your-gateway-ip>/v2/point`
+3. Update `SM_LOCAL_BASE_URL` in `.env.local`
+
+### Dashboard not updating
+
+**Symptom:** Display is stuck on an old image.
+**Cause:** Service may have stopped or crashed.
+**Fix:**
 ```bash
-./.venv312/bin/python scripts/generate_readme_screenshots.py
+sudo systemctl status solar-dashboard
+sudo journalctl -u solar-dashboard -f
 ```
 
-Useful local files:
+### TLS certificate errors
 
-- `tmp/solar-eink-dashboard-PROJECT.md`
-- `tmp/Solar Manager API.pdf`
-- `.ai/solar-manager-eink-dashboard-context.md`
-- `CLAUDE.md`
+**Symptom:** Connection refused or SSL errors in logs.
+**Cause:** Gateway uses a self-signed certificate.
+**Fix:** Add certificate pinning to `.env.local`:
+```bash
+# Get the fingerprint from your gateway
+openssl s_client -connect <gateway-ip>:443 < /dev/null 2>/dev/null \
+  | openssl x509 -fingerprint -sha256 -noout
+```
+Then add to `.env.local`:
+```dotenv
+SM_LOCAL_TLS_FINGERPRINT_SHA256=<the-fingerprint>
+```
 
-## Status
+## License
 
-What is already working:
-
-- mock dashboard preview
-- live preview with real gateway data
-- scenario previews for common flow states
-- correct local persistence and current-day aggregation
-- Figma-aligned HTML/CSS/SVG renderer
-- peak-production marker in the 24h chart aligned to the visible production curve
-- PNG export from the HTML renderer
-- persistent Playwright renderer with warm Chromium for production use
-- IT8951 e-paper display driver with GC16 full refresh
-- production loop with day rollover, startup reconciliation, retention cleanup, signal handling
-- bundled Inter font for cross-platform rendering consistency
-- deployment assets: systemd unit, setup script, hardware bring-up script
-- optional i18n for `EN`, `DE`, `FR`, `IT`
-- optional cloud backfill for missing daily history and the current-day startup gap
-
-What is still open:
-
-- partial refresh strategy (DU mode) — needs real-panel testing before enabling
-- long-running thermal/memory validation on Pi 5
+[MIT](LICENSE)
