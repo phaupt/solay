@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from mock_data import DESIGN_REVIEW_WEEK_KWH, get_mock_live_point
 from src.html_renderer import build_dashboard_context
 from src.models import DailySummary, DashboardData, SensorPoint
+from src.models import ChartBucket
 from src import web_preview
 
 
@@ -57,6 +58,27 @@ def test_chart_includes_peak_production_marker_and_label():
     assert "chart-peak-line" in chart
     assert "chart-peak-label" in chart
     assert "Peak Production: 1221 W" in chart
+
+
+def test_peak_marker_uses_raw_peak_for_y_scale_not_only_bucket_average():
+    data = DashboardData(
+        live=_make_live(),
+        chart_buckets=[
+            ChartBucket(
+                timestamp=datetime(2026, 3, 19, 10, 0, tzinfo=timezone.utc),
+                p_w_avg=5200,
+                c_w_avg=1800,
+                samples=5,
+            )
+        ],
+        peak_production_w=10135,
+        daily_history=_make_history(),
+    )
+
+    chart = str(build_dashboard_context(data)["chart_svg"])
+
+    assert 'Peak Production: 10135 W' in chart
+    assert '<line class="chart-peak-line" x1="76.0" y1="10.0"' not in chart
 
 
 def test_build_dashboard_context_marks_stale_live_data():

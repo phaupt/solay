@@ -364,6 +364,7 @@ def _build_chart_svg(data: DashboardData, language: str) -> Markup:
     max_power = max(
         max((bucket.p_w_avg for bucket in buckets), default=0.0),
         max((bucket.c_w_avg for bucket in buckets), default=0.0),
+        data.peak_production_w,
     )
     padded_peak = max_power * 1.02
     y_max = max(4000, int(((padded_peak + 1999) // 2000) * 2000))
