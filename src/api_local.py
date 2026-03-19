@@ -283,6 +283,14 @@ class StreamCollector:
         if self._device_metadata_loaded:
             return
 
+        # Rate-limit retries after transient failures (wait 60s before retrying).
+        import time
+        now = time.monotonic()
+        last = getattr(self, "_metadata_last_attempt", 0.0)
+        if now - last < 60.0 and last > 0.0:
+            return
+        self._metadata_last_attempt = now
+
         fetch = getattr(self._client, "get_devices", None)
         if fetch is None:
             self._device_metadata_loaded = True
@@ -291,8 +299,7 @@ class StreamCollector:
         try:
             devices = fetch() or []
         except Exception as exc:
-            logger.debug("Geräte-Metadaten konnten nicht geladen werden: %s", exc)
-            self._device_metadata_loaded = True
+            logger.debug("Geräte-Metadaten konnten nicht geladen werden: %s — wird erneut versucht", exc)
             return
 
         if not isinstance(devices, list):

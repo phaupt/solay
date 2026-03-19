@@ -37,6 +37,7 @@ class ProductionLoop:
         self._renderer = renderer
         self._display = display
         self._stopped = False
+        self._render_failures = 0
 
         tz = ZoneInfo(config.TIMEZONE)
         self._tz = tz
@@ -58,7 +59,7 @@ class ProductionLoop:
             self._run_one_cycle()
 
             # Sleep in 1-second increments so we can respond to stop quickly.
-            deadline = time.monotonic() + config.RENDER_INTERVAL_SECONDS
+            deadline = time.monotonic() + config.DISPLAY_UPDATE_INTERVAL
             while not self._stopped and time.monotonic() < deadline:
                 time.sleep(1)
 
@@ -89,8 +90,15 @@ class ProductionLoop:
         image = None
         try:
             image = self._renderer.render(data)
+            self._render_failures = 0
         except Exception:
-            logger.warning("Renderer failed", exc_info=True)
+            self._render_failures = getattr(self, "_render_failures", 0) + 1
+            logger.warning(
+                "Renderer failed (%d consecutive)", self._render_failures,
+                exc_info=True,
+            )
+            if self._render_failures >= 3:
+                self._restart_renderer()
 
         # Display
         if image is not None and self._display is not None:
@@ -105,6 +113,30 @@ class ProductionLoop:
                     logger.warning("Display reset also failed", exc_info=True)
 
         self._maybe_cleanup()
+
+    # ------------------------------------------------------------------
+    # Renderer self-healing
+    # ------------------------------------------------------------------
+
+    def _restart_renderer(self) -> None:
+        """Tear down and recreate the renderer after repeated failures."""
+        logger.warning("Attempting renderer restart after %d failures", self._render_failures)
+        try:
+            self._renderer.close()
+        except Exception:
+            logger.debug("Ignoring error during renderer teardown", exc_info=True)
+
+        try:
+            self._renderer = self._renderer.__class__(
+                theme=getattr(self._renderer, "_theme", None),
+                lang=getattr(self._renderer, "_lang", None),
+                grayscale_levels=getattr(self._renderer, "_grayscale_levels", None),
+                timeout=getattr(self._renderer, "_timeout", None),
+            )
+            self._render_failures = 0
+            logger.info("Renderer restarted successfully")
+        except Exception:
+            logger.error("Renderer restart failed — will retry next cycle", exc_info=True)
 
     # ------------------------------------------------------------------
     # Day rollover & reconciliation

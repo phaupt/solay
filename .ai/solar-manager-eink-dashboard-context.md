@@ -6,7 +6,7 @@ Use this file as shared project context for AI coding agents working in this rep
 
 - `tmp/solar-eink-dashboard-PROJECT.md`
 - `tmp/Solar Manager API.pdf`
-- current repo code, but treat it as work in progress rather than source of truth
+- current repo code — the production pipeline is implemented and the codebase is the source of truth
 
 ## What This Project Is
 
@@ -125,7 +125,7 @@ For the chart:
 
 ## Working Style
 
-- Be willing to challenge the existing prototype if it is wrong.
+- Be willing to challenge existing code if it is wrong.
 - Keep mock data only for tests or UI iteration.
 - Prefer a correct data model over a fast but misleading demo.
 - If a better structure than the current project doc emerges, explain it briefly and move forward.

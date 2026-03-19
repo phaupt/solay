@@ -25,7 +25,7 @@ class TestQuantizeImage:
     def test_levels_2_produces_black_and_white(self):
         gray = Image.new("L", (4, 4), 100)
         result = quantize_image(gray, 2)
-        pixels = list(result.getdata())
+        pixels = list(result.get_flattened_data())
         assert all(p in (0, 255) for p in pixels)
 
     def test_levels_1_returns_grayscale(self):
@@ -36,7 +36,7 @@ class TestQuantizeImage:
     def test_identity_at_256_levels(self):
         gray = Image.new("L", (4, 4), 137)
         result = quantize_image(gray, 256)
-        assert list(result.getdata()) == [137] * 16
+        assert list(result.get_flattened_data()) == [137] * 16
 
 
 # ---------------------------------------------------------------------------

@@ -45,7 +45,7 @@ if os.getenv("RUN_LOCAL_SM_TESTS") == "1":
 # --- Solar Manager Lokale API ---
 SM_LOCAL_BASE_URL = os.getenv("SM_LOCAL_BASE_URL", "http://192.168.1.XXX")
 SM_LOCAL_API_KEY = os.getenv("SM_LOCAL_API_KEY", "")
-SM_LOCAL_VERIFY_TLS = os.getenv("SM_LOCAL_VERIFY_TLS", "false").lower() == "true"
+SM_LOCAL_VERIFY_TLS = os.getenv("SM_LOCAL_VERIFY_TLS", "true").lower() != "false"
 SM_LOCAL_CA_BUNDLE = os.getenv("SM_LOCAL_CA_BUNDLE", "")
 SM_LOCAL_TLS_FINGERPRINT_SHA256 = os.getenv("SM_LOCAL_TLS_FINGERPRINT_SHA256", "")
 SM_LOCAL_TIMEOUT_SECONDS = 10

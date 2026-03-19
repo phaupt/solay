@@ -6,6 +6,11 @@ out/
 *.db-shm
 *.db-wal
 
+# Secret env files (credentials, API keys)
+.env.local
+.env.test.local
+.env*.local
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

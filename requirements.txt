@@ -1,14 +1,18 @@
 # Core
-pillow
-requests
-numpy
+pillow>=12.1.1
+requests>=2.31
+numpy>=1.26
 
 # WebSocket-Client für lokalen Stream
-websocket-client
+websocket-client>=1.6
 
 # Dev-Modus
-flask
-playwright
+flask>=3.0
+playwright>=1.40
+
+# Templating
+jinja2>=3.1
+markupsafe>=2.1
 
 # Tests
 pytest

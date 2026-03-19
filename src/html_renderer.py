@@ -10,7 +10,7 @@ from markupsafe import Markup
 
 import config
 from src.flow_logic import FLOW_THRESHOLD_W, determine_flow_active
-from src.i18n import normalize_language, tr, weekday_name
+from src.i18n import normalize_language, tr, weekday_short_name
 from src.models import DashboardData
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -118,35 +118,35 @@ def _node_state(data: DashboardData, language: str) -> dict[str, dict[str, objec
     live = data.live
     if live is None:
         return {
-            "solar": {"label": "Solar", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
-            "grid": {"label": "Grid", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
-            "home": {"label": "Home", "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
-            "battery": {"label": "Battery", "value": "\u2014", "sub": tr(language, "unavailable"), "dimmed": True},
+            "solar": {"label": tr(language, "node_solar"), "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "grid": {"label": tr(language, "node_grid"), "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "home": {"label": tr(language, "node_home"), "value": "\u2014", "sub": tr(language, "no_live_data"), "dimmed": True},
+            "battery": {"label": tr(language, "node_battery"), "value": "\u2014", "sub": tr(language, "unavailable"), "dimmed": True},
         }
 
     battery_value, battery_sub, battery_dimmed = _battery_secondary(data, language)
     stale = _is_live_stale(data)
     return {
         "solar": {
-            "label": "Solar",
+            "label": tr(language, "node_solar"),
             "value": _format_kw_value(live.p_w),
             "sub": "kW",
             "dimmed": stale and live.p_w <= FLOW_THRESHOLD_W,
         },
         "grid": {
-            "label": "Grid",
+            "label": tr(language, "node_grid"),
             "value": _format_kw_signed(live.grid_w),
             "sub": "kW",
             "dimmed": stale and abs(live.grid_w) <= FLOW_THRESHOLD_W,
         },
         "home": {
-            "label": "Home",
+            "label": tr(language, "node_home"),
             "value": _format_kw_value(live.c_w),
             "sub": "kW",
             "dimmed": stale and live.c_w <= FLOW_THRESHOLD_W,
         },
         "battery": {
-            "label": "Battery",
+            "label": tr(language, "node_battery"),
             "value": battery_value,
             "sub": battery_sub,
             "dimmed": stale or battery_dimmed,
@@ -532,7 +532,7 @@ def _week_history_items(data: DashboardData, language: str) -> list[dict[str, ob
         produced_wh = summary.production_wh if summary is not None else 0.0
         consumed_wh = summary.consumption_wh if summary is not None else 0.0
         is_today = item_date == today
-        label = tr(language, "today") if is_today else weekday_name(language, item_date.weekday())
+        label = tr(language, "today") if is_today else weekday_short_name(language, item_date.weekday())
         if len(custom_labels) == len(dates):
             label = custom_labels[index]
         items.append(

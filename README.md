@@ -112,10 +112,10 @@ Important:
 
 - use the Solar Manager gateway IP, not the inverter IP
 - prefer `https`
-- for many local gateways, certificate verification is not turnkey; use either
-  - `SM_LOCAL_VERIFY_TLS=false`
-  - or `SM_LOCAL_TLS_FINGERPRINT_SHA256=...`
-  - or `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem`
+- TLS verification is enabled by default; for gateways with self-signed certs, prefer one of:
+  - `SM_LOCAL_TLS_FINGERPRINT_SHA256=...` (recommended — pin to the gateway cert)
+  - `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem` (if you have a local CA)
+  - `SM_LOCAL_VERIFY_TLS=false` (last resort — disables all TLS checks)
 - `DASHBOARD_LANGUAGE` supports `EN` (default), `DE`, `FR`, `IT`
 
 ### Optional cloud backfill

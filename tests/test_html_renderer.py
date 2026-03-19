@@ -9,20 +9,21 @@ from src import web_preview
 
 
 def _make_history():
+    today = date.today()
     return [
         DailySummary(
-            local_date=date(2026, 3, day),
-            production_wh=42000 + day * 100,
-            consumption_wh=9000 + day * 50,
+            local_date=today - timedelta(days=6 - i),
+            production_wh=42000 + i * 100,
+            consumption_wh=9000 + i * 50,
             samples=120,
         )
-        for day in range(13, 20)
+        for i in range(7)
     ]
 
 
 def _make_live(ts: datetime | None = None, **kwargs) -> SensorPoint:
     defaults = dict(
-        timestamp=ts or datetime(2026, 3, 19, 13, 32, 0, tzinfo=timezone.utc),
+        timestamp=ts or datetime.now(timezone.utc),
         c_w=3107,
         p_w=2204,
         bc_w=0,
@@ -110,11 +111,12 @@ def test_flask_preview_serves_html_dashboard():
 
 
 def test_build_dashboard_context_pads_week_history_to_seven_days():
+    today = date.today()
     data = DashboardData(
         live=_make_live(),
         daily_history=[
-            DailySummary(local_date=date(2026, 3, 18), production_wh=12000, consumption_wh=5000),
-            DailySummary(local_date=date(2026, 3, 19), production_wh=8000, consumption_wh=3000),
+            DailySummary(local_date=today - timedelta(days=1), production_wh=12000, consumption_wh=5000),
+            DailySummary(local_date=today, production_wh=8000, consumption_wh=3000),
         ],
     )
 

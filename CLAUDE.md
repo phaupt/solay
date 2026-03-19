@@ -11,10 +11,10 @@ Solar Manager E-Ink Dashboard for Raspberry Pi. Collects real-time solar energy 
 Before making architectural or data-model changes, read:
 
 - `.ai/solar-manager-eink-dashboard-context.md` — hard technical constraints, API details, architectural bias
-- `tmp/solar-eink-dashboard-PROJECT.md` — full product spec (German), acceptance criteria, known prototype errors
+- `tmp/solar-eink-dashboard-PROJECT.md` — full product spec (German), acceptance criteria, known early-stage issues
 - `tmp/Solar Manager API.pdf` — official API docs
 
-Treat the current code as a prototype that may contain wrong assumptions.
+The production pipeline is implemented. Verify assumptions against the live codebase before making architectural changes.
 
 ## Commands
 
@@ -126,7 +126,9 @@ Optional legacy fallback:
 All via environment variables or `.env.local` (see `config.py`). Key settings:
 - `SM_LOCAL_BASE_URL` — gateway address (required for live mode)
 - `SM_LOCAL_API_KEY` — optional API key
-- `SM_LOCAL_VERIFY_TLS` / `SM_LOCAL_CA_BUNDLE` / `SM_LOCAL_TLS_FINGERPRINT_SHA256` — TLS options
+- `SM_LOCAL_VERIFY_TLS` — TLS verification, enabled by default (set `false` only as last resort)
+- `SM_LOCAL_TLS_FINGERPRINT_SHA256` — pin to gateway cert fingerprint (preferred for self-signed)
+- `SM_LOCAL_CA_BUNDLE` — path to custom CA bundle
 - `DASHBOARD_LANGUAGE` — `EN` / `DE` / `FR` / `IT`
 - `TZ` — timezone, default `Europe/Zurich` (used via `zoneinfo.ZoneInfo` throughout)
 - `DB_PATH` — default `solar_dashboard.db`

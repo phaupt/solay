@@ -31,10 +31,15 @@ log = logging.getLogger(__name__)
 _SENTINEL = object()
 
 _DEFAULT_TIMEOUT = 30  # seconds
+_STARTUP_TIMEOUT = 60  # seconds — fail fast if Chromium won't launch
 
 
 class RendererTimeout(Exception):
     """Raised when a render call exceeds the configured timeout."""
+
+
+class RendererStartupError(Exception):
+    """Raised when the background Chromium browser fails to start."""
 
 
 @runtime_checkable
@@ -105,18 +110,35 @@ class PersistentPlaywrightRenderer:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue | None = None  # type: ignore[type-arg]
         self._ready = threading.Event()
+        self._startup_error: BaseException | None = None
+        self._consecutive_failures = 0
         self._closed = False
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self._ready.wait()
+        if not self._ready.wait(timeout=_STARTUP_TIMEOUT):
+            self._closed = True
+            self._cleanup_thread()
+            raise RendererStartupError(
+                f"Chromium browser did not start within {_STARTUP_TIMEOUT}s"
+            )
+        if self._startup_error is not None:
+            self._closed = True
+            self._cleanup_thread()
+            raise RendererStartupError(
+                f"Chromium browser startup failed: {self._startup_error}"
+            ) from self._startup_error
 
     # -- background thread ----------------------------------------------------
 
     def _run_loop(self) -> None:
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._worker())
+        try:
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_until_complete(self._worker())
+        except Exception as exc:
+            self._startup_error = exc
+            self._ready.set()  # unblock the waiting __init__
 
     async def _worker(self) -> None:
         from playwright.async_api import async_playwright
@@ -145,7 +167,9 @@ class PersistentPlaywrightRenderer:
                     png_bytes = await _render_screenshot(page, html)
                     img = _bytes_to_image(png_bytes, self._grayscale_levels)
                     future.set_result(img)
+                    self._consecutive_failures = 0
                 except Exception as exc:
+                    self._consecutive_failures += 1
                     future.set_exception(exc)
 
             await browser.close()
@@ -173,13 +197,25 @@ class PersistentPlaywrightRenderer:
         out.parent.mkdir(parents=True, exist_ok=True)
         img.save(str(out))
 
+    def _cleanup_thread(self) -> None:
+        """Best-effort shutdown of the background thread and event loop."""
+        if self._loop is not None and self._queue is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._queue.put_nowait, _SENTINEL)
+            except RuntimeError:
+                pass  # loop already closed
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except RuntimeError:
+                pass
+        self._thread.join(timeout=5)
+
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        if self._loop is not None and self._queue is not None:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, _SENTINEL)
-        self._thread.join(timeout=10)
+        self._cleanup_thread()
 
 
 # ---------------------------------------------------------------------------
