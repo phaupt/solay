@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Solar Manager Dashboard Preview</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <div class="dashboard-shell">
+        <main class="dashboard" aria-label="Solar Manager dashboard preview">
+            <section class="dashboard__top">
+                <section class="panel chart-panel" aria-label="24 hour chart">
+                    <div class="chart-panel__canvas">{{ chart_svg }}</div>
+                </section>
+
+                <section class="panel flow-panel" aria-label="Live energy flow">
+                    <div class="flow-panel__meta">
+                        <span class="flow-panel__update">{{ last_update }}</span>
+                    </div>
+                    <div class="flow-panel__canvas">{{ flow_svg }}</div>
+                </section>
+            </section>
+
+            <section class="panel history-panel" aria-label="7 day history">
+                {% if week_history %}
+                    <div class="history-grid">
+                        {% for day in week_history %}
+                            <article class="history-day{% if day.is_today %} is-today{% endif %}">
+                                <div class="history-day__name">{{ day.label }}</div>
+                                <div class="history-metric">
+                                    <div class="history-metric__value history-metric__value--primary">
+                                        <span class="history-metric__number">{{ day.produced }}</span>
+                                        <span class="history-metric__unit">kWh</span>
+                                    </div>
+                                    <div class="history-metric__label">produced</div>
+                                </div>
+                                <div class="history-metric">
+                                    <div class="history-metric__value">
+                                        <span class="history-metric__number">{{ day.consumed }}</span>
+                                        <span class="history-metric__unit">kWh</span>
+                                    </div>
+                                    <div class="history-metric__label">consumed</div>
+                                </div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="history-empty">No 7-day history yet</div>
+                {% endif %}
+            </section>
+        </main>
+    </div>
+
+    <script>
+        (() => {
+            const root = document.documentElement;
+            const defaultTheme = "{{ theme_default }}";
+            root.dataset.theme = defaultTheme;
+
+            window.setInterval(() => {
+                window.location.reload();
+            }, {{ refresh_seconds * 1000 }});
+
+            if (window.location.hash.includes("figmacapture=")) {
+                const script = document.createElement("script");
+                script.src = "https://mcp.figma.com/mcp/html-to-design/capture.js";
+                script.async = true;
+                document.head.appendChild(script);
+            }
+        })();
+    </script>
+</body>
+</html>

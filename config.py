@@ -61,15 +61,18 @@ SM_GATEWAY_ID = os.getenv("SM_GATEWAY_ID", "")
 TIMEZONE = os.getenv("TZ", "Europe/Zurich")
 
 # --- Display ---
+# Default physical target: Waveshare 7.8" e-Paper HAT (IT8951), 1872x1404.
 DISPLAY_WIDTH = 1872
 DISPLAY_HEIGHT = 1404
 DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "SOLAR DASHBOARD")
+DASHBOARD_THEME = os.getenv("DASHBOARD_THEME", "light").strip().lower()
 
 # --- Datenerfassung ---
 # Intervall für point-Polling als Fallback wenn Stream nicht verfügbar
 POLL_INTERVAL_SECONDS = 10
 # Intervall für Dashboard-Rendering
 RENDER_INTERVAL_SECONDS = 30
+STALE_DATA_SECONDS = int(os.getenv("STALE_DATA_SECONDS", "300"))
 
 # --- Persistenz ---
 DB_PATH = os.getenv("DB_PATH", "solar_dashboard.db")

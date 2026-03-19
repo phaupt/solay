@@ -176,4 +176,5 @@ class DashboardData:
     chart_buckets: list[ChartBucket] = field(default_factory=list)
     daily_summary: DailySummary | None = None
     daily_history: list[DailySummary] = field(default_factory=list)
+    history_labels: list[str] = field(default_factory=list)
     devices: list[DeviceStatus] = field(default_factory=list)

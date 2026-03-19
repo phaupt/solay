@@ -1,4 +1,5 @@
-"""Tests: Renderer nutzt konfigurierte Zeitzone statt hartem Offset."""
+"""Tests: Renderer nutzt konfigurierte Zeitzone statt hartem Offset,
+and flow semantics correctly determine active paths."""
 
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from src.renderer import (
     _draw_daily_chart,
     _draw_header,
     _to_local_timestamp,
+    determine_flow_active,
     render_dashboard,
 )
 
@@ -31,7 +33,6 @@ class TestHeaderTimezone:
         img, draw = _make_image_and_draw()
         _draw_header(draw, data, config.DISPLAY_WIDTH)
 
-        # Prüfe die korrekte Lokalzeit-Konvertierung direkt
         local = _to_local_timestamp(ts)
         assert local.hour == 15
         assert local.minute == 30
@@ -82,8 +83,88 @@ class TestChartTimezone:
         data = DashboardData(chart_buckets=buckets)
 
         img, draw = _make_image_and_draw()
-        _draw_daily_chart(draw, data, 48, 300, 1048, 640)
+        _draw_daily_chart(draw, data, 48, 300, 924, 640)
         # Kein Fehler = Konvertierung funktioniert
+
+
+class TestFlowSemantics:
+    """Test determine_flow_active for correct battery charging source logic."""
+
+    def test_solar_surplus_charges_battery(self):
+        """Solar surplus > consumption: Solar→Battery active, Grid→Battery off."""
+        active = determine_flow_active(
+            p_w=8000, c_w=3000, grid_w=-3500,
+            bc_w=1500, bd_w=0, has_bat=True,
+        )
+        assert active[("solar", "battery")] is True
+        assert active[("grid", "battery")] is False
+        assert active[("solar", "home")] is True
+        assert active[("solar", "grid")] is True  # exporting
+
+    def test_grid_charges_battery_no_solar(self):
+        """Night: no solar, grid charges battery → Grid→Battery active."""
+        active = determine_flow_active(
+            p_w=0, c_w=500, grid_w=2500,
+            bc_w=2000, bd_w=0, has_bat=True,
+        )
+        assert active[("solar", "battery")] is False
+        assert active[("grid", "battery")] is True
+        assert active[("grid", "home")] is True
+        assert active[("solar", "home")] is False
+
+    def test_grid_charges_battery_insufficient_solar(self):
+        """Solar covers part of home, grid covers rest + battery charging."""
+        active = determine_flow_active(
+            p_w=2000, c_w=3000, grid_w=2000,
+            bc_w=1000, bd_w=0, has_bat=True,
+        )
+        # Solar surplus = max(0, 2000-3000) = 0 → no solar→battery
+        assert active[("solar", "battery")] is False
+        assert active[("grid", "battery")] is True
+        assert active[("solar", "home")] is True
+        assert active[("grid", "home")] is True
+
+    def test_split_charging_solar_and_grid(self):
+        """Solar partially covers home + battery, grid provides the rest."""
+        active = determine_flow_active(
+            p_w=4000, c_w=3000, grid_w=1000,
+            bc_w=2000, bd_w=0, has_bat=True,
+        )
+        # Solar surplus = max(0, 4000-3000) = 1000 > threshold
+        # Grid importing = 1000 > threshold
+        assert active[("solar", "battery")] is True
+        assert active[("grid", "battery")] is True
+
+    def test_battery_discharging(self):
+        """Battery discharging to home → Battery→Home active."""
+        active = determine_flow_active(
+            p_w=1000, c_w=3000, grid_w=1000,
+            bc_w=0, bd_w=1000, has_bat=True,
+        )
+        assert active[("battery", "home")] is True
+        assert active[("solar", "battery")] is False
+        assert active[("grid", "battery")] is False
+
+    def test_battery_idle(self):
+        """Battery present but idle (neither charging nor discharging)."""
+        active = determine_flow_active(
+            p_w=3000, c_w=3000, grid_w=0,
+            bc_w=10, bd_w=5, has_bat=True,
+        )
+        assert active[("solar", "battery")] is False
+        assert active[("grid", "battery")] is False
+        assert active[("battery", "home")] is False
+
+    def test_no_battery(self):
+        """No battery system → all battery paths inactive."""
+        active = determine_flow_active(
+            p_w=5000, c_w=3000, grid_w=-2000,
+            bc_w=0, bd_w=0, has_bat=False,
+        )
+        assert active[("solar", "battery")] is False
+        assert active[("grid", "battery")] is False
+        assert active[("battery", "home")] is False
+        assert active[("solar", "grid")] is True  # exporting
 
 
 class TestRenderDashboardStates:
@@ -143,5 +224,20 @@ class TestRenderDashboardStates:
         """Live-Daten vorhanden aber keine Historie."""
         live = self._make_live(p_w=1000, c_w=800)
         data = DashboardData(live=live)
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_grid_charges_battery(self):
+        """Netz lädt Batterie (kein Solar-Überschuss)."""
+        live = self._make_live(p_w=0, c_w=500, bc_w=2000, bd_w=0, soc=30)
+        data = DashboardData(live=live, daily_history=self._make_history())
+        img = render_dashboard(data)
+        assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+
+    def test_battery_soc_zero(self):
+        """soc=0 is a valid state (empty battery), not 'no battery'."""
+        live = self._make_live(p_w=5000, c_w=3000, soc=0)
+        assert live.has_battery
+        data = DashboardData(live=live, daily_history=self._make_history())
         img = render_dashboard(data)
         assert img.size == (config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)

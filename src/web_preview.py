@@ -1,107 +1,83 @@
-"""Flask Dev-Server: Dashboard-Vorschau im Browser.
-
-Security:
-- Bindet standardmässig auf 127.0.0.1 (nur lokal erreichbar)
-- Kein Debug-Modus
-- Kein offener Listener im Heimnetz als Default
-"""
+"""Flask dev preview for the HTML/CSS/SVG dashboard."""
 
 from __future__ import annotations
 
-import io
 import logging
-import threading
-import time
 from typing import Callable
 
-from flask import Flask, Response
+from flask import Flask, Response, request, render_template, url_for
 
 import config
+from src.html_renderer import build_dashboard_context
 from src.models import DashboardData
+from src.preview_scenarios import SCENARIO_LABELS, apply_preview_scenario
 from src.renderer import render_dashboard
 
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-_current_image_bytes: bytes | None = None
-_lock = threading.Lock()
+_get_dashboard_data: Callable[[], DashboardData] | None = None
 
 
-def update_image(dashboard_data: DashboardData):
-    """Rendere das Dashboard neu und cache das PNG."""
-    global _current_image_bytes
-    img = render_dashboard(dashboard_data)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    with _lock:
-        _current_image_bytes = buf.getvalue()
+def _require_dashboard_data() -> DashboardData:
+    if _get_dashboard_data is None:
+        raise RuntimeError("Dashboard data provider is not configured")
+    return _get_dashboard_data()
 
 
 @app.route("/")
 def index():
-    refresh_seconds = config.RENDER_INTERVAL_SECONDS
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>{config.DASHBOARD_TITLE}</title>
-    <meta charset="utf-8">
-    <style>
-        body {{
-            margin: 0;
-            background: #2a2a2a;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            font-family: -apple-system, sans-serif;
-        }}
-        .container {{ text-align: center; }}
-        img {{
-            max-width: 95vw;
-            max-height: 90vh;
-            border: 2px solid #555;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        }}
-        .info {{
-            color: #888;
-            font-size: 14px;
-            margin-top: 10px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <img src="/dashboard.png" id="dashboard" />
-        <div class="info">
-            Auto-Refresh alle {refresh_seconds}s &bull;
-            {config.DISPLAY_WIDTH}&times;{config.DISPLAY_HEIGHT} px &bull;
-            16 Graustufen
-        </div>
-    </div>
-    <script>
-        if (window.location.hash.includes('figmacapture=')) {{
-            const script = document.createElement('script');
-            script.src = 'https://mcp.figma.com/mcp/html-to-design/capture.js';
-            script.async = true;
-            document.head.appendChild(script);
-        }}
-        setInterval(function() {{
-            document.getElementById('dashboard').src = '/dashboard.png?' + Date.now();
-        }}, {refresh_seconds * 1000});
-    </script>
-</body>
-</html>"""
+    theme = request.args.get("theme")
+    scenario = request.args.get("scenario")
+    try:
+        data = apply_preview_scenario(_require_dashboard_data(), scenario)
+        context = build_dashboard_context(data, theme=theme)
+    except Exception as exc:  # pragma: no cover - defensive preview fallback
+        logger.exception("Preview rendering failed")
+        return Response(
+            (
+                "<!DOCTYPE html><html><body style='font-family:sans-serif;padding:24px'>"
+                f"<h1>Dashboard preview failed</h1><pre>{exc!s}</pre></body></html>"
+            ),
+            status=500,
+            mimetype="text/html",
+        )
+    return render_template("dashboard.html", **context)
+
+
+@app.route("/scenarios")
+def scenarios():
+    links = []
+    for key, label in SCENARIO_LABELS.items():
+        links.append(
+            f"<li><a href='{url_for('index')}?scenario={key}'>{label}</a>"
+            f" <code>?scenario={key}</code></li>"
+        )
+    body = (
+        "<!DOCTYPE html><html><body style='font-family:sans-serif;padding:24px;line-height:1.5'>"
+        "<h1>Dashboard Preview Scenarios</h1>"
+        f"<p><a href='{url_for('index')}'>Default preview</a></p>"
+        "<ul>"
+        + "".join(links)
+        + "</ul></body></html>"
+    )
+    return Response(body, mimetype="text/html")
 
 
 @app.route("/dashboard.png")
 def dashboard_png():
-    with _lock:
-        data = _current_image_bytes
-    if data is None:
-        return Response("Dashboard not yet rendered", status=503)
-    return Response(data, mimetype="image/png",
-                    headers={"Cache-Control": "no-cache"})
+    """Optional PNG fallback for comparison/export workflows."""
+    data = _require_dashboard_data()
+    img = render_dashboard(data)
+    from io import BytesIO
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return Response(
+        buf.getvalue(),
+        mimetype="image/png",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 def start_server(
@@ -109,32 +85,12 @@ def start_server(
     host: str | None = None,
     port: int | None = None,
 ):
-    """Starte den Flask Dev-Server mit periodischem Rendering.
+    """Start the local browser preview server."""
+    global _get_dashboard_data
+    _get_dashboard_data = get_dashboard_data
 
-    Args:
-        get_dashboard_data: Callable das DashboardData liefert.
-        host: Bind-Adresse (default: 127.0.0.1).
-        port: Server-Port (default: 8080).
-    """
     host = host or config.WEB_HOST
     port = port or config.WEB_PORT
-
-    # Initiales Rendering
-    try:
-        update_image(get_dashboard_data())
-    except Exception as e:
-        logger.error("Initiales Rendering fehlgeschlagen: %s", e)
-
-    def refresh_loop():
-        while True:
-            time.sleep(config.RENDER_INTERVAL_SECONDS)
-            try:
-                update_image(get_dashboard_data())
-            except Exception as e:
-                logger.error("Render-Fehler: %s", e)
-
-    t = threading.Thread(target=refresh_loop, daemon=True)
-    t.start()
 
     logger.info("Dashboard: http://%s:%d", host, port)
     print(f"Dashboard: http://{host}:{port}")

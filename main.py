@@ -71,7 +71,13 @@ def build_dashboard_data(storage: Storage, collector=None) -> DashboardData:
 
 def run_mock_mode(port: int):
     """Mock-Modus: Separate DB mit Testdaten füllen, dann Browser-Preview."""
-    from mock_data import get_mock_devices, seed_mock_database
+    from mock_data import (
+        get_mock_devices,
+        get_mock_live_point,
+        get_mock_review_history,
+        DESIGN_REVIEW_WEEK_KWH,
+        seed_mock_database,
+    )
 
     db_path = config.MOCK_DB_PATH
     # Frische Mock-DB (nie die Live-DB anfassen)
@@ -89,6 +95,9 @@ def run_mock_mode(port: int):
     def get_data() -> DashboardData:
         data = build_dashboard_data(storage)
         data.devices = mock_devices
+        data.live = get_mock_live_point()
+        data.daily_history = get_mock_review_history()
+        data.history_labels = [label for label, _, _ in DESIGN_REVIEW_WEEK_KWH]
         return data
 
     start_server(get_data, port=port)

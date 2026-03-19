@@ -1,172 +1,175 @@
 # Solar E-Ink Dashboard
 
-A wall-mounted E-Ink display for [Solar Manager](https://www.solarmanager.ch/) that shows live solar production, consumption, battery state, and historical charts — powered by a Raspberry Pi.
+A Raspberry Pi wall dashboard for Solar Manager with a Figma-aligned HTML/CSS/SVG preview, local SQLite history, and a layout optimized for a high-resolution grayscale E-Ink display.
 
-## What You Get
+## Screenshots
 
-- Live power values (PV, consumption, grid, battery)
-- 24h chart of today's production and consumption
-- Daily totals with self-consumption rate and autarky degree
-- 30-day PV performance overview
-- Device status (Wattpilot, boiler, etc.)
-- Optimized for 16-level grayscale E-Ink displays
+![Mock dashboard](docs/screenshots/mock-dashboard.png)
+![No battery scenario](docs/screenshots/mock-dashboard-no-battery.png)
 
-## Hardware
+## Current Scope
 
-| Component | Example | Notes |
-|-----------|---------|-------|
-| Raspberry Pi | Pi 4 or Pi 5 (2 GB+) | Any model with network access works |
-| E-Ink display | Waveshare 7.8" (1872x1404) | Connected via USB/SPI, 16 grayscale levels |
-| Solar Manager gateway | Any Solar Manager installation | Must be reachable on the local network |
-| Power supply | Official Pi PSU | USB-C for Pi 4/5 |
-| Case / frame | Picture frame or 3D-printed | Optional, for wall mounting |
+The current main dashboard contains:
 
-The display resolution is configured for 1872x1404. If you use a different display, adjust `DISPLAY_WIDTH` and `DISPLAY_HEIGHT` in your `.env.local`.
+- live flow panel with `Solar`, `Grid`, `Home`, and `Battery`
+- current-day 24h chart for production vs. consumption
+- 7-day history strip with `produced` and `consumed`
+- mock preview, state/scenario previews, and live preview from a real Solar Manager gateway
 
-## Prerequisites
+Not on the current main screen:
 
-- Python 3.9 or newer (3.11+ recommended for HTTPS gateways)
-- The Solar Manager gateway must be accessible on your LAN
-- You need the gateway's local IP address (e.g. `http://192.168.1.100`)
-- Optional: a local API key if your gateway requires one
+- extra KPI cards for import/export/self-consumption/autarky
+- device list
+- PV performance block
 
-## Setup
+## Preview Modes
 
-### 1. Clone and install
+### Mock preview
 
 ```bash
-git clone https://github.com/<your-user>/solar-eink-dashboard.git
-cd solar-eink-dashboard
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
+./.venv312/bin/python main.py --mock --port 8090
 ```
 
-### 2. Configure
+Open:
 
-Create a `.env.local` file in the project root (this file is git-ignored):
+- `http://127.0.0.1:8090/` for the default mock dashboard
+- `http://127.0.0.1:8090/scenarios` for common fixed preview states
+
+Supported scenario URLs:
+
+- `/?scenario=pv_surplus`
+- `/?scenario=pv_deficit`
+- `/?scenario=night`
+- `/?scenario=battery_support`
+- `/?scenario=grid_charge`
+- `/?scenario=no_battery`
+- `/?scenario=stale`
+
+### Live preview
 
 ```bash
-# Required: your Solar Manager gateway IP
-SM_LOCAL_BASE_URL=http://192.168.1.100
+./.venv312/bin/python main.py --port 8080
+```
 
-# Optional: API key if your gateway requires one
-SM_LOCAL_API_KEY=your-key-here
+Open:
 
-# Optional: timezone (default: Europe/Zurich)
+- `http://127.0.0.1:8080/`
+
+Live mode uses your local Solar Manager gateway data via `/v2/stream`, with `/v2/point` as fallback.
+
+## Local Configuration
+
+Create a local `.env.local` in the repo root. This file stays out of git.
+
+Example:
+
+```dotenv
+SM_LOCAL_BASE_URL=https://192.168.1.95
+SM_LOCAL_API_KEY=your-local-api-key
+SM_LOCAL_VERIFY_TLS=false
 TZ=Europe/Zurich
+WEB_HOST=127.0.0.1
+WEB_PORT=8080
 ```
 
-See [Configuration Reference](#configuration-reference) below for all options.
+Important:
 
-### 3. Test with mock data
+- use the Solar Manager gateway IP, not the inverter IP
+- prefer `https`
+- for many local gateways, certificate verification is not turnkey; use either
+  - `SM_LOCAL_VERIFY_TLS=false`
+  - or `SM_LOCAL_TLS_FINGERPRINT_SHA256=...`
+  - or `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem`
 
-Before connecting to real hardware, verify everything works:
+## Architecture
 
-```bash
-./venv/bin/python main.py --mock
+The current architecture is:
+
+```text
+Solar Manager Gateway
+  ├── /v2/stream  (primary live source)
+  └── /v2/point   (fallback snapshot)
+          ↓
+src/api_local.py
+          ↓
+src/storage.py      SQLite WAL
+          ↓
+src/aggregator.py   chart buckets + daily summaries
+          ↓
+src/models.py       DashboardData
+          ↓
+src/html_renderer.py
+          ↓
+src/web_preview.py  Flask preview
 ```
 
-Open http://127.0.0.1:8080 in your browser. You should see a dashboard with simulated data. Mock mode uses a separate database and never touches your live data.
+Notes:
 
-### 4. Run live
+- the HTML/CSS/SVG renderer is the primary visual path
+- `src/renderer.py` still exists as a legacy PNG/Pillow fallback via `/dashboard.png`
+- mock mode and live mode use separate SQLite databases
 
-```bash
-./venv/bin/python main.py
+## Domain Rules
+
+- local `Wh` values are interval values, not daily totals
+- daily totals must be summed from all interval `Wh` samples
+- `/v2/stream` is the correct primary source for intraday charting
+- battery-aware grid power is:
+
+```text
+grid_w = c_w + bc_w - p_w - bd_w
 ```
 
-The app connects to your gateway's WebSocket stream, collects data every ~10 seconds, and renders the dashboard. Open http://127.0.0.1:8080 to see the live preview.
+Semantics:
 
-If the WebSocket stream is temporarily unavailable, the app automatically falls back to HTTP polling until the stream reconnects.
+- positive `grid_w` = import / Bezug
+- negative `grid_w` = export / Einspeisung
 
-### 5. Run on boot (Raspberry Pi)
+## Hardware Target
 
-Create a systemd service to start the dashboard automatically:
+Reference target:
 
-```bash
-sudo nano /etc/systemd/system/solar-dashboard.service
-```
+- Raspberry Pi 5B
+- Waveshare 7.8" e-Paper HAT with IT8951 controller
+- resolution target: `1872x1404`
 
-```ini
-[Unit]
-Description=Solar E-Ink Dashboard
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/solar-eink-dashboard
-ExecStart=/home/pi/solar-eink-dashboard/venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable solar-dashboard
-sudo systemctl start solar-dashboard
-```
-
-## HTTPS Options for the Local Gateway
-
-Some Solar Manager gateways expose HTTPS with a self-signed certificate. Three modes are supported:
-
-**1. No verification (simplest, local network only)**
-```
-SM_LOCAL_VERIFY_TLS=false
-```
-
-**2. Certificate fingerprint pinning (recommended)**
-```
-SM_LOCAL_VERIFY_TLS=false
-SM_LOCAL_TLS_FINGERPRINT_SHA256=AA:BB:CC:...
-```
-
-**3. Custom CA bundle**
-```
-SM_LOCAL_VERIFY_TLS=true
-SM_LOCAL_CA_BUNDLE=/path/to/ca.pem
-```
-
-For most home-network setups, fingerprint pinning is the most practical secure option.
-
-## Configuration Reference
-
-All settings via environment variables or `.env.local`:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SM_LOCAL_BASE_URL` | — | Gateway address (required) |
-| `SM_LOCAL_API_KEY` | — | API key for the gateway |
-| `SM_LOCAL_VERIFY_TLS` | `false` | Enable TLS certificate verification |
-| `SM_LOCAL_CA_BUNDLE` | — | Path to custom CA bundle |
-| `SM_LOCAL_TLS_FINGERPRINT_SHA256` | — | Pin gateway certificate by SHA-256 fingerprint |
-| `TZ` | `Europe/Zurich` | Timezone for day boundaries and display |
-| `DB_PATH` | `solar_dashboard.db` | SQLite database path |
-| `MOCK_DB_PATH` | `solar_dashboard_mock.db` | Separate database for mock mode |
-| `RAW_RETENTION_DAYS` | `7` | Auto-delete raw data older than N days |
-| `DISPLAY_WIDTH` | `1872` | Display width in pixels |
-| `DISPLAY_HEIGHT` | `1404` | Display height in pixels |
-| `WEB_HOST` | `127.0.0.1` | Web preview bind address |
-| `WEB_PORT` | `8080` | Web preview port |
-| `POLL_INTERVAL_SECONDS` | `10` | Fallback polling interval |
-| `RENDER_INTERVAL_SECONDS` | `30` | Dashboard re-render interval |
+The current browser preview is the main design-validation path. A fully integrated HTML-to-PNG/E-Ink export path is still the next hardware-facing step.
 
 ## Development
 
+Setup:
+
 ```bash
-# Run all tests
-./venv/bin/pytest tests/ -v
-
-# Run a single test file
-./venv/bin/pytest tests/test_aggregator.py -v
-
-# Run integration tests (requires real gateway on LAN)
-RUN_LOCAL_SM_TESTS=1 ./venv/bin/pytest tests/test_local_api_integration.py -v
+python3.12 -m venv .venv312
+./.venv312/bin/pip install -r requirements.txt
 ```
 
-## License
+Tests:
 
-See [LICENSE](LICENSE).
+```bash
+./.venv312/bin/pytest -q
+RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -v
+```
+
+Useful local files:
+
+- `tmp/solar-eink-dashboard-PROJECT.md`
+- `tmp/Solar Manager API.pdf`
+- `.ai/solar-manager-eink-dashboard-context.md`
+- `CLAUDE.md`
+
+## Status
+
+What is already working:
+
+- mock dashboard preview
+- live preview with real gateway data
+- scenario previews for common flow states
+- correct local persistence and current-day aggregation
+- Figma-aligned HTML/CSS/SVG renderer
+
+What is still open:
+
+- final HTML-to-PNG export path for the actual E-Ink device
+- hardware refresh strategy and deployment polish on Raspberry Pi
+- optional backfill for incomplete day history after restart

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Solar Manager E-Ink Dashboard for Raspberry Pi. Collects real-time solar energy data from a local Solar Manager gateway via WebSocket stream, persists in SQLite, aggregates correctly, and renders a 1872×1404 grayscale image for an E-Ink display.
+Solar Manager E-Ink Dashboard for Raspberry Pi. Collects real-time solar energy data from a local Solar Manager gateway via WebSocket stream, persists it in SQLite, aggregates correctly, and renders the main dashboard primarily through HTML/CSS/SVG for a Figma-aligned browser preview.
 
 ## Key Documentation
 
@@ -20,22 +20,25 @@ Treat the current code as a prototype that may contain wrong assumptions.
 
 ```bash
 # Setup
-python -m venv venv && ./venv/bin/pip install -r requirements.txt
+python3.12 -m venv .venv312 && ./.venv312/bin/pip install -r requirements.txt
 
-# Run with mock data (browser preview at http://127.0.0.1:8080)
-./venv/bin/python main.py --mock
+# Run with mock data
+./.venv312/bin/python main.py --mock --port 8090
 
 # Run live (requires SM_LOCAL_BASE_URL in .env.local)
-./venv/bin/python main.py
+./.venv312/bin/python main.py --port 8080
+
+# Preview scenarios
+open http://127.0.0.1:8090/scenarios
 
 # Run all unit tests
-./venv/bin/pytest tests/ -v
+./.venv312/bin/pytest tests/ -v
 
 # Run a single test file
-./venv/bin/pytest tests/test_aggregator.py -v
+./.venv312/bin/pytest tests/test_aggregator.py -v
 
 # Run integration tests (requires real gateway on LAN)
-RUN_LOCAL_SM_TESTS=1 ./venv/bin/pytest tests/test_local_api_integration.py -v
+RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -v
 ```
 
 ## Architecture
@@ -53,9 +56,12 @@ Solar Manager Gateway (LAN)
                 ↓
   aggregator.py (5-min chart buckets, daily Wh summation)
                 ↓
-  renderer.py (Pillow, 1872×1404, 16 grayscale levels)
+  html_renderer.py (primary HTML/CSS/SVG renderer)
                 ↓
-  web_preview.py (Flask dev server) or E-Ink driver (future)
+  web_preview.py (Flask dev server)
+
+Optional legacy fallback:
+  renderer.py (Pillow PNG fallback via /dashboard.png)
 ```
 
 **Key modules:**
@@ -63,8 +69,10 @@ Solar Manager Gateway (LAN)
 - `src/api_local.py` — `LocalApiClient` (HTTP), `StreamCollector` (WebSocket with auto-reconnect + exponential backoff)
 - `src/storage.py` — SQLite with WAL mode for concurrent read/write
 - `src/aggregator.py` — Chart bucket averaging and daily Wh summation
-- `src/renderer.py` — Pillow-based grayscale rendering
+- `src/html_renderer.py` — Primary browser-faithful dashboard renderer
+- `src/renderer.py` — Legacy PNG/Pillow fallback
 - `src/web_preview.py` — Flask dev server (binds 127.0.0.1 only)
+- `src/preview_scenarios.py` — fixed dashboard state overrides for preview/review
 - `config.py` — All config from env vars, loaded from `.env.local` (git-ignored)
 
 ## Critical Domain Rules
@@ -74,8 +82,10 @@ Solar Manager Gateway (LAN)
 - **`/v2/stream` is the primary data source** for intraday history. `/v2/point` is an active fallback — when the stream drops, the collector polls `/v2/point` until the stream reconnects.
 - **Timezone handling:** All time conversions use `zoneinfo.ZoneInfo(config.TIMEZONE)`. Never use hard-coded UTC offsets. Day boundaries, chart x-axis, and "today" aggregation must respect DST transitions.
 - **`soc=0` is a valid value** (empty battery). Only `soc is None` means "no battery present".
+- **Current main screen:** live flow + 24h chart + 7-day history. No device list, no PV-performance block, no extra KPI-card section.
 - **E-Ink constraints:** 16 grayscale levels, no color, optimize for readability at distance.
 - **Security by design:** No secrets in source, `.env.local` for credentials, dev server on localhost only, no Flask debug mode.
+- **Docs sync matters:** When the architecture or main screen changes, update `README.md`, `.ai/solar-manager-eink-dashboard-context.md`, and this file.
 
 ## Configuration
 
