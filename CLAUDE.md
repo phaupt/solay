@@ -19,14 +19,23 @@ Treat the current code as a prototype that may contain wrong assumptions.
 ## Commands
 
 ```bash
-# Setup
+# Setup (dev machine)
 python3.12 -m venv .venv312 && ./.venv312/bin/pip install -r requirements.txt
+
+# Setup (Raspberry Pi — installs IT8951, Playwright, systemd service)
+bash scripts/setup-pi.sh
 
 # Run with mock data
 ./.venv312/bin/python main.py --mock --port 8090
 
 # Run live (requires SM_LOCAL_BASE_URL in .env.local)
 ./.venv312/bin/python main.py --port 8080
+
+# Production mode (collect → render → e-ink display loop)
+./.venv312/bin/python main.py --production
+
+# Production headless (render loop without e-paper hardware)
+./.venv312/bin/python main.py --production --no-display
 
 # Preview scenarios
 open http://127.0.0.1:8090/scenarios
@@ -39,6 +48,9 @@ open http://127.0.0.1:8090/scenarios
 
 # Run integration tests (requires real gateway on LAN)
 RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -v
+
+# Hardware bring-up (IT8951 validation on Pi)
+./.venv312/bin/python scripts/epaper_test.py --vcom YOUR_VCOM
 ```
 
 ## Architecture
@@ -58,7 +70,14 @@ Solar Manager Gateway (LAN)
                 ↓
   html_renderer.py (primary HTML/CSS/SVG renderer)
                 ↓
-  web_preview.py (Flask dev server)
+  ┌─────────────┼─────────────────┐
+  │             │                 │
+  web_preview.py    renderer_png.py    export_dashboard.py
+  (Flask dev)       (Playwright PNG)   (one-shot export)
+                        ↓
+                    epaper.py (IT8951 display driver)
+                        ↓
+                    production.py (timer loop, day rollover, signal handling)
 
 Optional legacy fallback:
   renderer.py (Pillow PNG fallback via /dashboard.png)
@@ -70,8 +89,11 @@ Optional legacy fallback:
 - `src/storage.py` — SQLite with WAL mode for concurrent read/write
 - `src/aggregator.py` — Chart bucket averaging and daily Wh summation
 - `src/html_renderer.py` — Primary browser-faithful dashboard renderer
-- `src/dashboard_document.py` — Standalone HTML document rendering for export
-- `src/export_dashboard.py` — PNG export path via Playwright
+- `src/dashboard_document.py` — Standalone HTML document rendering for export (with embedded Inter font)
+- `src/export_dashboard.py` — One-shot PNG export path via Playwright
+- `src/renderer_png.py` — `PersistentPlaywrightRenderer` (warm Chromium) + `OneShotPlaywrightRenderer`
+- `src/epaper.py` — IT8951 e-paper display driver (show, clear, sleep/wake)
+- `src/production.py` — `ProductionLoop`: timer-based collect→render→display with day rollover, startup reconciliation, retention cleanup, signal handling
 - `src/renderer.py` — Legacy PNG/Pillow fallback
 - `src/web_preview.py` — Flask dev server (binds 127.0.0.1 only)
 - `src/preview_scenarios.py` — fixed dashboard state overrides for preview/review
@@ -112,3 +134,6 @@ All via environment variables or `.env.local` (see `config.py`). Key settings:
 - `RAW_RETENTION_DAYS` — default 7
 - `SM_CLOUD_BACKFILL_ENABLED` + `SM_CLOUD_EMAIL` + `SM_CLOUD_PASSWORD` + `SM_CLOUD_SMID` — optional cloud backfill
 - `RENDER_INTERVAL_SECONDS` — default 15
+- `DISPLAY_UPDATE_INTERVAL` — e-paper refresh cadence in seconds, default 60
+- `EPAPER_VCOM` — VCOM voltage from the panel FPC label (e.g. `-1.48`), required for `--production`
+- `DISPLAY_FULL_REFRESH_INTERVAL` — full GC16 refreshes between partial updates, default 1

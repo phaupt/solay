@@ -18,7 +18,8 @@ The current main dashboard contains:
 - peak production marker line aligned to the displayed production curve
 - 7-day history strip with `produced` and `consumed`
 - mock preview, state/scenario previews, and live preview from a real Solar Manager gateway
-- optional HTML-to-PNG export path for the E-Ink target
+- HTML-to-PNG export path for the E-Ink target
+- production mode with persistent Playwright renderer and IT8951 e-paper display driver
 - optional cloud backfill for missing previous days and the current-day startup gap
 - configurable dashboard language: `EN`, `DE`, `FR`, `IT`
 
@@ -75,6 +76,20 @@ The browser preview auto-refreshes every 15 seconds.
 
 The export path renders the same HTML/CSS/SVG dashboard through Playwright and writes a PNG at `1872x1404`.
 By default, the output is quantized to 16 grayscale levels for the E-Ink target.
+
+### Production mode (Raspberry Pi)
+
+```bash
+# Full production loop: collect → render → e-paper display
+./.venv312/bin/python main.py --production
+
+# Headless (render loop without e-paper hardware, for testing)
+./.venv312/bin/python main.py --production --no-display
+```
+
+Production mode runs a timer-based loop that collects data, renders the dashboard via a persistent Playwright instance, and pushes the grayscale PNG to the IT8951 e-paper display. Includes day-rollover detection with re-aggregation, startup reconciliation for yesterday's summary, hourly retention cleanup, and graceful shutdown on SIGTERM/SIGINT.
+
+Requires `EPAPER_VCOM` in `.env.local` (check the FPC cable label on the display panel).
 
 ## Local Configuration
 
@@ -142,9 +157,14 @@ src/models.py       DashboardData
           ↓
 src/html_renderer.py
           ↓
-src/web_preview.py  Flask preview
-          ↓
-src/export_dashboard.py  PNG export via Playwright
+┌─────────┼──────────────────┐
+│         │                  │
+web_preview.py  renderer_png.py    export_dashboard.py
+(Flask dev)     (Playwright PNG)   (one-shot export)
+                     ↓
+                epaper.py (IT8951)
+                     ↓
+                production.py (timer loop)
 ```
 
 Notes:
@@ -181,17 +201,35 @@ Reference target:
 - Waveshare 7.8" e-Paper HAT with IT8951 controller
 - resolution target: `1872x1404`
 
-The current browser preview is the main design-validation path. A fully integrated HTML-to-PNG/E-Ink export path is still the next hardware-facing step.
-The HTML-to-PNG export path now exists; the remaining hardware-facing work is the actual IT8951 display integration and refresh strategy.
+The full pipeline is implemented: collect → persist → aggregate → render (HTML/CSS/SVG) → screenshot (Playwright) → quantize (16 grayscale) → display (IT8951 GC16).
+
+### Pi deployment
+
+```bash
+# First-time setup (SPI, venv, IT8951, Playwright, systemd)
+bash scripts/setup-pi.sh
+
+# Hardware validation
+./.venv312/bin/python scripts/epaper_test.py --vcom -1.48
+
+# Start production service
+sudo systemctl start solar-dashboard
+```
 
 ## Development
 
-Setup:
+Setup (dev machine):
 
 ```bash
 python3.12 -m venv .venv312
 ./.venv312/bin/pip install -r requirements.txt
 ./.venv312/bin/python -m playwright install chromium
+```
+
+Setup (Raspberry Pi):
+
+```bash
+bash scripts/setup-pi.sh
 ```
 
 Tests:
@@ -225,10 +263,15 @@ What is already working:
 - Figma-aligned HTML/CSS/SVG renderer
 - peak-production marker in the 24h chart aligned to the visible production curve
 - PNG export from the HTML renderer
+- persistent Playwright renderer with warm Chromium for production use
+- IT8951 e-paper display driver with GC16 full refresh
+- production loop with day rollover, startup reconciliation, retention cleanup, signal handling
+- bundled Inter font for cross-platform rendering consistency
+- deployment assets: systemd unit, setup script, hardware bring-up script
 - optional i18n for `EN`, `DE`, `FR`, `IT`
 - optional cloud backfill for missing daily history and the current-day startup gap
 
 What is still open:
 
-- hardware refresh strategy and deployment polish on Raspberry Pi
-- direct IT8951 display integration from the exported PNG path
+- partial refresh strategy (DU mode) — needs real-panel testing before enabling
+- long-running thermal/memory validation on Pi 5
