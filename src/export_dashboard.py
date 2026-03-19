@@ -13,13 +13,17 @@ from src.html_renderer import build_dashboard_context
 from src.models import DashboardData
 
 
-def _quantize_grayscale(path: Path, levels: int) -> None:
-    image = Image.open(path).convert("L")
+def quantize_image(image: Image.Image, levels: int) -> Image.Image:
+    """Quantize a PIL Image to N grayscale levels. Returns a new image."""
+    gray = image.convert("L")
     if levels <= 1:
-        image.save(path)
-        return
+        return gray.point(lambda px: 0)
     step = 255 / (levels - 1)
-    quantized = image.point(lambda px: int(round(px / step) * step))
+    return gray.point(lambda px: int(round(px / step) * step))
+
+
+def _quantize_grayscale(path: Path, levels: int) -> None:
+    quantized = quantize_image(Image.open(path), levels)
     quantized.save(path)
 
 
