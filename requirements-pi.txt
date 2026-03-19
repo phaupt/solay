@@ -1,0 +1,8 @@
+pillow>=10.0
+numpy>=1.26
+requests>=2.31
+websocket-client>=1.6
+flask>=3.0
+playwright>=1.40
+jinja2>=3.1
+cython>=3.0
