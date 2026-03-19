@@ -98,5 +98,10 @@ WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
 # "dev" = Browser-Preview, "prod" = E-Ink
 DISPLAY_MODE = os.getenv("DISPLAY_MODE", "dev")
 
+# --- Production / E-Ink ---
+DISPLAY_UPDATE_INTERVAL = int(os.getenv("DISPLAY_UPDATE_INTERVAL", "60"))
+EPAPER_VCOM = os.getenv("EPAPER_VCOM", "")
+DISPLAY_FULL_REFRESH_INTERVAL = int(os.getenv("DISPLAY_FULL_REFRESH_INTERVAL", "1"))
+
 # --- Export ---
 EXPORT_GRAYSCALE_LEVELS = int(os.getenv("EXPORT_GRAYSCALE_LEVELS", "16"))
