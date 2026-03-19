@@ -135,14 +135,14 @@ def test_build_dashboard_context_supports_localized_literals():
     assert context["week_history"][-1]["label"] == "Heute"
 
 
-def test_week_history_uses_short_labels_for_french_layout_safety():
+def test_week_history_uses_full_labels_with_safe_sizing():
     data = DashboardData(live=_make_live(), daily_history=_make_history())
 
     context = build_dashboard_context(data, lang="fr")
 
     labels = [item["label"] for item in context["week_history"]]
-    assert labels[-1] == "Auj."
-    assert all(len(label) <= 5 for label in labels)
+    assert labels[-1] == "Aujourd'hui"
+    assert any(item["name_class"] == "history-day__name--xlong" for item in context["week_history"])
 
 
 def test_flask_preview_supports_scenario_override():
@@ -211,6 +211,7 @@ def test_build_dashboard_context_uses_custom_history_labels():
     context = build_dashboard_context(data)
 
     assert [item["label"] for item in context["week_history"]] == labels
+    assert context["week_history"][2]["name_class"] == "history-day__name--long"
 
 
 def test_mock_live_reference_matches_figma_state():

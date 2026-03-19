@@ -311,7 +311,7 @@ body {
 }
 
 .history-day {
-    padding: 6px 18px 4px;
+    padding: 6px 12px 4px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -325,13 +325,30 @@ body {
 
 .history-day__name {
     color: var(--text-secondary);
-    font-size: 34px;
     font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.05;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: clip;
+}
+
+.history-day__name--short {
+    font-size: 34px;
+}
+
+.history-day__name--medium {
+    font-size: 33px;
+}
+
+.history-day__name--long {
+    font-size: 31px;
+    letter-spacing: -0.01em;
+}
+
+.history-day__name--xlong {
+    font-size: 29px;
+    letter-spacing: -0.015em;
 }
 
 .history-day.is-today .history-day__name {

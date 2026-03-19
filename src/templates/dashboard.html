@@ -31,7 +31,7 @@
                     <div class="history-grid">
                         {% for day in week_history %}
                             <article class="history-day{% if day.is_today %} is-today{% endif %}">
-                                <div class="history-day__name">{{ day.label }}</div>
+                                <div class="history-day__name {{ day.name_class }}">{{ day.label }}</div>
                                 <div class="history-metric">
                                     <div class="history-metric__value history-metric__value--primary">
                                         <span class="history-metric__number">{{ day.produced }}</span>
