@@ -183,24 +183,87 @@ def export_once(mock: bool, output_path: str, theme: str | None = None, lang: st
     logger.info("PNG export geschrieben: %s", exported)
 
 
+def _validate_vcom(vcom_str: str) -> float:
+    """Validate EPAPER_VCOM. Exit with error if invalid."""
+    if not vcom_str.strip():
+        logger.error(
+            "EPAPER_VCOM not set. Check the label on the panel ribbon cable "
+            "and set EPAPER_VCOM in .env.local (e.g. EPAPER_VCOM=-1.48)."
+        )
+        sys.exit(1)
+    try:
+        vcom = float(vcom_str)
+    except ValueError:
+        logger.error("EPAPER_VCOM='%s' is not a valid number.", vcom_str)
+        sys.exit(1)
+    if vcom > 0 or vcom < -5.0:
+        logger.error(
+            "EPAPER_VCOM=%.2f is outside expected range (-5.0 to 0.0). "
+            "Check the panel label.", vcom
+        )
+        sys.exit(1)
+    return vcom
+
+
+def run_production_mode(no_display: bool, theme: str | None, lang: str | None):
+    """Production mode: collect → render → display loop."""
+    from src.renderer_png import PersistentPlaywrightRenderer
+    from src.production import ProductionLoop
+
+    if not no_display:
+        vcom = _validate_vcom(config.EPAPER_VCOM)
+
+    storage, collector = create_live_storage_and_collector()
+    renderer = PersistentPlaywrightRenderer(theme=theme, lang=lang)
+
+    display = None
+    if not no_display:
+        from src.epaper import EpaperDisplay
+        display = EpaperDisplay(vcom=vcom)
+
+    loop = ProductionLoop(storage, collector, renderer, display)
+    loop.run()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Solar E-Ink Dashboard")
     parser.add_argument("--mock", action="store_true",
                         help="Mock-Daten für UI-Entwicklung verwenden")
-    parser.add_argument("--port", type=int, default=config.WEB_PORT,
-                        help="Web-Preview Port (default: 8080)")
+    parser.add_argument("--production", action="store_true",
+                        help="Production mode: collect → render → e-ink display loop")
     parser.add_argument("--export-png", type=str, default="",
                         help="Dashboard einmalig als PNG exportieren")
+    parser.add_argument("--no-display", action="store_true",
+                        help="Production mode without e-paper hardware (headless)")
+    parser.add_argument("--port", type=int, default=config.WEB_PORT,
+                        help="Web-Preview Port (default: 8080)")
     parser.add_argument("--theme", type=str, default="",
                         help="Theme override: light|dark")
     parser.add_argument("--lang", type=str, default="",
                         help="Language override: en|de|fr|it")
     args = parser.parse_args()
 
+    # --production is mutually exclusive with --mock and --export-png,
+    # but --mock and --export-png CAN combine (existing documented workflow:
+    # `main.py --mock --export-png out/dashboard.png`).
+    if args.production and args.mock:
+        parser.error("--production and --mock are mutually exclusive")
+    if args.production and args.export_png:
+        parser.error("--production and --export-png are mutually exclusive")
+
     if args.export_png:
         export_once(
             args.mock,
             args.export_png,
+            theme=args.theme or None,
+            lang=args.lang or None,
+        )
+        return
+
+    if args.production:
+        logger.info("Starting in production mode")
+        run_production_mode(
+            args.no_display,
             theme=args.theme or None,
             lang=args.lang or None,
         )
