@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this project in a publication, article, or demo write-up, please cite the repository."
+title: "Solar Manager E-Paper Dashboard for Raspberry Pi"
+abstract: "Wall-mounted Solar Manager dashboard for Waveshare e-paper on Raspberry Pi. Shows live energy flow, daily production vs. consumption, and 7-day history."
+authors:
+  - family-names: "Haupt"
+    given-names: "Philipp"
+repository-code: "https://github.com/phaupt/solay"
+url: "https://github.com/phaupt/solay"
+license: "PolyForm-Noncommercial-1.0.0"
+keywords:
+  - "solar-manager"
+  - "raspberry-pi"
+  - "waveshare"
+  - "e-paper"
+  - "energy-dashboard"

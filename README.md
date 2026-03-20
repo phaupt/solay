@@ -1,10 +1,14 @@
-# Solar E-Ink Dashboard
+# Solar Manager E-Paper Dashboard for Raspberry Pi
 
-> A wall-mounted e-paper display for your Solar Manager. Shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
+> Wall-mounted Solar Manager dashboard for Waveshare e-paper on Raspberry Pi. Shows live energy flow, today's production vs. consumption, and 7-day history at a glance.
 
 <p align="center">
   <img src="docs/screenshots/hero-product-photo.png" alt="Solar E-Ink Dashboard on a Waveshare 7.8 inch e-paper display in a wooden frame" width="720">
 </p>
+
+**20-second overview:** This project turns a Raspberry Pi 5 and a Waveshare 7.8" e-paper display into a quiet, always-on Solar Manager dashboard. It connects to the local Solar Manager v2 API, stores live data in SQLite, and refreshes a high-resolution grayscale display every 60 seconds by default.
+
+**Who this is for:** Solar Manager users who want a dedicated home energy dashboard instead of keeping a tablet or phone mounted on the wall.
 
 **What the display shows:**
 
@@ -50,8 +54,8 @@ The setup script requires `python3.12`. See `scripts/setup-pi.sh` for how it is 
 ### 2. Clone the repo and run setup
 
 ```bash
-git clone https://github.com/phaupt/solay.git
-cd solay
+git clone https://github.com/phaupt/solay.git ~/solar-eink-dashboard
+cd ~/solar-eink-dashboard
 bash scripts/setup-pi.sh
 ```
 
@@ -78,7 +82,7 @@ sudo reboot
 After reboot, test the e-paper display:
 
 ```bash
-cd solar-eink-dashboard
+cd ~/solar-eink-dashboard
 ./.venv312/bin/python scripts/epaper_test.py --vcom <your-vcom>
 ```
 
