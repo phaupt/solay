@@ -8,6 +8,7 @@ GEMINI.md
 docs/specs/
 docs/superpowers/
 tmp/
+docs/community-posts.md
 out/
 .DS_Store
 *.db
