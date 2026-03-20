@@ -59,6 +59,6 @@ See the README for the Raspberry Pi setup flow, `.env.local` configuration, disp
 
 ## Known Constraints
 
-- Historical backfill is optional and depends on Solar Manager cloud credentials
+- Full history continuity is optional. Without Solar Manager cloud credentials, the dashboard still works, but the 7-day history only includes data collected locally on this Pi.
 - Production deployment expects the Waveshare IT8951-based 7.8" panel
 ```

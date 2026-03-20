@@ -130,7 +130,7 @@ TLS verification is enabled by default. For gateways with self-signed certificat
 
 ## Cloud Backfill (optional)
 
-The local gateway has no historical data endpoint. If you restart the Pi, the 7-day history chart will have gaps. The optional cloud backfill fills in:
+The local gateway has no historical data endpoint. The dashboard still works without cloud backfill, but after a restart or fresh install the 7-day history will only show data collected locally on this Pi. Optional cloud backfill uses your Solar Manager cloud account to fill in:
 
 - **Previous days:** missing daily summaries from before the restart
 - **Today's gap:** the period between midnight and whenever the Pi first started collecting
