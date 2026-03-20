@@ -25,7 +25,17 @@ Use 10 to 12 literal topics that match how people search:
 
 ## Suggested Social Preview
 
-Create a `1280x640` image with:
+Generated asset in this repo:
+
+- `docs/screenshots/github-social-preview.jpg`
+
+Regenerate it with:
+
+```bash
+python3 scripts/generate_social_preview.py
+```
+
+Design notes:
 
 - the hardware photo on one side
 - one dashboard screenshot on the other side
