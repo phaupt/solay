@@ -3,8 +3,10 @@ from zoneinfo import ZoneInfo
 
 from mock_data import DESIGN_REVIEW_WEEK_KWH, get_mock_live_point
 from src.html_renderer import build_dashboard_context
+from src.i18n import weekday_name
 from src.models import DailySummary, DashboardData, SensorPoint
 from src.models import ChartBucket
+from src.preview_scenarios import apply_preview_scenario
 from src import web_preview
 
 
@@ -41,7 +43,7 @@ def test_build_dashboard_context_has_expected_sections():
     assert "Last update" in context["last_update"]
     assert "flow-svg" in str(context["flow_svg"])
     assert "chart-svg" in str(context["chart_svg"])
-    assert context["week_history"][-1]["label"] == "Today"
+    assert context["week_history"][-1]["label"] == weekday_name("en", date.today().weekday())
     assert context["week_history"][-1]["produced"]
 
 
@@ -123,7 +125,7 @@ def test_build_dashboard_context_pads_week_history_to_seven_days():
     context = build_dashboard_context(data)
 
     assert len(context["week_history"]) == 7
-    assert context["week_history"][-1]["label"] == "Today"
+    assert context["week_history"][-1]["label"] == weekday_name("en", date.today().weekday())
     assert context["week_history"][0]["produced"] == "0.0"
 
 
@@ -134,16 +136,20 @@ def test_build_dashboard_context_supports_localized_literals():
 
     assert context["last_update"].startswith("Letztes Update")
     assert context["produced_label"] == "produziert"
-    assert context["week_history"][-1]["label"] == "Heute"
+    assert context["week_history"][-1]["label"] == weekday_name("de", date.today().weekday())
 
 
 def test_week_history_uses_full_labels_with_safe_sizing():
     data = DashboardData(live=_make_live(), daily_history=_make_history())
 
-    context = build_dashboard_context(data, lang="fr")
+    context = build_dashboard_context(data, lang="de")
 
     labels = [item["label"] for item in context["week_history"]]
-    assert labels[-1] == "Aujourd'hui"
+    expected = [
+        weekday_name("de", (date.today() - timedelta(days=offset)).weekday())
+        for offset in range(6, -1, -1)
+    ]
+    assert labels == expected
     assert any(item["name_class"] == "history-day__name--xlong" for item in context["week_history"])
 
 
@@ -198,8 +204,12 @@ def test_flask_preview_scenarios_index_lists_links():
     body = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "Dashboard Preview Scenarios" in body
-    assert "?scenario=pv_surplus" in body
-    assert "?scenario=stale" in body
+    assert "?scenario=pv_surplus&lang=en" in body
+    assert "?scenario=stale&lang=it" in body
+    assert ">EN</a>" in body
+    assert ">DE</a>" in body
+    assert ">FR</a>" in body
+    assert ">IT</a>" in body
 
 
 def test_build_dashboard_context_uses_custom_history_labels():
@@ -214,6 +224,45 @@ def test_build_dashboard_context_uses_custom_history_labels():
 
     assert [item["label"] for item in context["week_history"]] == labels
     assert context["week_history"][2]["name_class"] == "history-day__name--long"
+
+
+def test_mock_dashboard_data_uses_localized_weekday_labels(tmp_path):
+    from main import build_mock_dashboard_data
+    from src.storage import Storage
+
+    data = build_mock_dashboard_data(Storage(str(tmp_path / "mock.db")))
+    context = build_dashboard_context(data, lang="de")
+
+    labels = [item["label"] for item in context["week_history"]]
+    expected = [
+        weekday_name("de", (date.today() - timedelta(days=offset)).weekday())
+        for offset in range(6, -1, -1)
+    ]
+    assert labels == expected
+    assert "Heute" not in labels
+    assert "Today" not in labels
+
+
+def test_mock_dashboard_data_is_fresh_by_default(tmp_path):
+    from main import build_mock_dashboard_data
+    from src.storage import Storage
+
+    data = build_mock_dashboard_data(Storage(str(tmp_path / "mock.db")))
+    context = build_dashboard_context(data, lang="en")
+
+    assert "stale" not in context["last_update"].lower()
+
+
+def test_preview_pv_surplus_is_fresh_but_stale_scenario_is_marked(tmp_path):
+    from main import build_mock_dashboard_data
+    from src.storage import Storage
+
+    data = build_mock_dashboard_data(Storage(str(tmp_path / "mock.db")))
+    fresh = build_dashboard_context(apply_preview_scenario(data, "pv_surplus"), lang="en")
+    stale = build_dashboard_context(apply_preview_scenario(data, "stale"), lang="en")
+
+    assert "stale" not in fresh["last_update"].lower()
+    assert "stale" in stale["last_update"].lower()
 
 
 def test_mock_live_reference_matches_figma_state():

@@ -10,6 +10,7 @@ from flask import Flask, Response, request, url_for
 import config
 from src.dashboard_document import render_dashboard_html
 from src.html_renderer import build_dashboard_context
+from src.i18n import SUPPORTED_LANGUAGES, normalize_language
 from src.models import DashboardData
 from src.preview_scenarios import SCENARIO_LABELS, apply_preview_scenario
 from src.renderer import render_dashboard
@@ -55,19 +56,48 @@ def index():
 
 @app.route("/scenarios")
 def scenarios():
-    links = []
+    theme = request.args.get("theme")
+    selected_lang = normalize_language(request.args.get("lang") or config.DASHBOARD_LANGUAGE)
+    language_codes = [lang.upper() for lang in SUPPORTED_LANGUAGES]
+
+    def _href(*, scenario: str | None = None, lang: str | None = None) -> str:
+        params = []
+        if scenario:
+            params.append(f"scenario={scenario}")
+        if lang:
+            params.append(f"lang={lang}")
+        if theme:
+            params.append(f"theme={theme}")
+        query = f"?{'&'.join(params)}" if params else ""
+        return f"{url_for('index')}{query}"
+
+    default_links = " · ".join(
+        f"<a href='{_href(lang=lang)}'>{lang.upper()}</a>" for lang in SUPPORTED_LANGUAGES
+    )
+    rows = []
     for key, label in SCENARIO_LABELS.items():
-        links.append(
-            f"<li><a href='{url_for('index')}?scenario={key}'>{label}</a>"
-            f" <code>?scenario={key}</code></li>"
+        cells = "".join(
+            f"<td><a href='{_href(scenario=key, lang=lang)}'>{lang.upper()}</a></td>"
+            for lang in SUPPORTED_LANGUAGES
         )
+        rows.append(f"<tr><th scope='row'>{label}</th>{cells}</tr>")
     body = (
         "<!DOCTYPE html><html><body style='font-family:sans-serif;padding:24px;line-height:1.5'>"
         "<h1>Dashboard Preview Scenarios</h1>"
-        f"<p><a href='{url_for('index')}'>Default preview</a></p>"
-        "<ul>"
-        + "".join(links)
-        + "</ul></body></html>"
+        "<p>Use this page to open each preview state directly in EN, DE, FR, or IT.</p>"
+        f"<p><strong>Default preview:</strong> {default_links}</p>"
+        f"<p><strong>Current default language:</strong> {selected_lang.upper()}</p>"
+        "<table style='border-collapse:collapse;margin-top:16px'>"
+        "<thead><tr><th style='text-align:left;padding:6px 12px 6px 0'>Scenario</th>"
+        + "".join(
+            f"<th style='text-align:left;padding:6px 12px'>{lang}</th>"
+            for lang in language_codes
+        )
+        + "</tr></thead>"
+        "<tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+        "</body></html>"
     )
     return Response(body, mimetype="text/html")
 

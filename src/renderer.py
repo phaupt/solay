@@ -172,7 +172,7 @@ def _format_kwh(wh: float) -> str:
 
 
 def _weekday_label_en(weekday: int) -> str:
-    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday]
+    return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday]
 
 
 # ── Bezier curve helper ──────────────────────────────────────────
@@ -592,10 +592,7 @@ def _draw_week_history(draw: ImageDraw.Draw, data: DashboardData,
         tx = col_left + 18
 
         # Day label
-        if summary.local_date == today_local:
-            day_label = "Today"
-        else:
-            day_label = _weekday_label_en(summary.local_date.weekday())
+        day_label = _weekday_label_en(summary.local_date.weekday())
         draw.text((tx, panel_top + 18), day_label,
                   fill=TEXT_MID, font=FONTS["week_day"])
 

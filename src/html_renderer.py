@@ -10,7 +10,7 @@ from markupsafe import Markup
 
 import config
 from src.flow_logic import FLOW_THRESHOLD_W, determine_flow_active
-from src.i18n import normalize_language, tr, weekday_short_name
+from src.i18n import normalize_language, tr, weekday_name
 from src.models import DashboardData
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -532,7 +532,7 @@ def _week_history_items(data: DashboardData, language: str) -> list[dict[str, ob
         produced_wh = summary.production_wh if summary is not None else 0.0
         consumed_wh = summary.consumption_wh if summary is not None else 0.0
         is_today = item_date == today
-        label = tr(language, "today") if is_today else weekday_short_name(language, item_date.weekday())
+        label = weekday_name(language, item_date.weekday())
         if len(custom_labels) == len(dates):
             label = custom_labels[index]
         items.append(

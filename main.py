@@ -14,7 +14,8 @@ import argparse
 import logging
 import os
 import sys
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import config
@@ -72,7 +73,6 @@ def build_dashboard_data(storage: Storage, collector=None) -> DashboardData:
 
 def build_mock_dashboard_data(storage: Storage) -> DashboardData:
     from mock_data import (
-        DESIGN_REVIEW_WEEK_KWH,
         get_mock_devices,
         get_mock_live_point,
         get_mock_review_history,
@@ -80,9 +80,10 @@ def build_mock_dashboard_data(storage: Storage) -> DashboardData:
 
     data = build_dashboard_data(storage)
     data.devices = get_mock_devices()
-    data.live = get_mock_live_point()
+    # Keep the approved review values, but refresh the timestamp so the default
+    # mock preview and non-stale scenarios do not appear stale later in the day.
+    data.live = replace(get_mock_live_point(), timestamp=datetime.now(timezone.utc))
     data.daily_history = get_mock_review_history()
-    data.history_labels = [label for label, _, _ in DESIGN_REVIEW_WEEK_KWH]
     return data
 
 
