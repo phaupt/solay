@@ -6,7 +6,7 @@
   <img src="docs/screenshots/hero-product-photo.png" alt="Solar E-Ink Dashboard on a Waveshare 7.8 inch e-paper display in a wooden frame" width="720">
 </p>
 
-**20-second overview:** This project turns a Raspberry Pi 5 and a Waveshare 7.8" e-paper display into a quiet, always-on Solar Manager dashboard. It connects to the local Solar Manager v2 API, stores live data in SQLite, and refreshes a high-resolution grayscale display every 60 seconds by default.
+**20-second overview:** This project turns a Raspberry Pi 5 and a Waveshare 7.8" e-paper display into a quiet, always-on Solar Manager dashboard. It connects to the local Solar Manager v2 API, stores live data in SQLite, and refreshes a high-resolution grayscale display every 15 seconds by default.
 
 **Who this is for:** Solar Manager users who want a dedicated home energy dashboard instead of keeping a tablet or phone mounted on the wall.
 
@@ -135,7 +135,7 @@ The dashboard should now be collecting data and updating the display. The servic
 Solar Manager gateway → local collector → SQLite → HTML renderer → Playwright PNG → e-paper display
 ```
 
-The Pi connects to the Solar Manager gateway on your LAN via WebSocket, collects live energy data, and stores it in a local SQLite database. A rendering pipeline converts the dashboard to HTML, screenshots it to a grayscale PNG via Playwright, and pushes it to the e-paper display periodically (default: every 60 seconds, configurable via `DISPLAY_UPDATE_INTERVAL`).
+The Pi connects to the Solar Manager gateway on your LAN via WebSocket, collects live energy data, and stores it in a local SQLite database. A rendering pipeline converts the dashboard to HTML, screenshots it to a grayscale PNG via Playwright, and pushes it to the e-paper display periodically (default: every 15 seconds, configurable via `DISPLAY_UPDATE_INTERVAL`).
 
 ## Configuration
 
@@ -150,16 +150,31 @@ All settings are configured via environment variables in `.env.local`.
 | `EPAPER_VCOM` | VCOM voltage (required for production) — see [finding the VCOM](#finding-the-vcom-voltage) | (empty) |
 | `DASHBOARD_LANGUAGE` | Display language: `EN`, `DE`, `FR`, `IT` | `EN` |
 | `TZ` | Timezone | `Europe/Zurich` |
-| `DISPLAY_UPDATE_INTERVAL` | E-paper refresh cadence in seconds | `60` |
+| `DISPLAY_UPDATE_INTERVAL` | E-paper refresh cadence in seconds | `15` |
 | `DISPLAY_FULL_REFRESH_INTERVAL` | Full GC16 refresh (brief black flash) every N updates; GL16 is used in between for flicker-free updates. At 15s update interval, 240 = once per hour | `240` |
 
 ### TLS configuration
 
-TLS verification is enabled by default. For gateways with self-signed certificates, choose one (in order of preference):
+The Solar Manager gateway uses a self-signed TLS certificate. The setup script defaults to `SM_LOCAL_VERIFY_TLS=false` in `.env.local`.
 
-1. **Certificate pinning (recommended):** `SM_LOCAL_TLS_FINGERPRINT_SHA256=<sha256-fingerprint>`
-2. **Custom CA bundle:** `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem`
-3. **Disable verification (last resort):** `SM_LOCAL_VERIFY_TLS=false`
+For additional security, pin the gateway's certificate fingerprint (the fingerprint is stable across certificate renewals on the same key pair):
+
+```dotenv
+SM_LOCAL_VERIFY_TLS=false
+SM_LOCAL_TLS_FINGERPRINT_SHA256=AA:BB:CC:...
+```
+
+Both settings are needed: `VERIFY_TLS=false` disables chain validation (which fails on self-signed certs), while the fingerprint ensures the Pi only talks to your specific gateway.
+
+To get the fingerprint:
+```bash
+openssl s_client -connect <gateway-ip>:443 < /dev/null 2>/dev/null \
+  | openssl x509 -fingerprint -sha256 -noout
+```
+
+Other options (if your gateway has a proper CA-signed certificate):
+1. **Custom CA bundle:** `SM_LOCAL_CA_BUNDLE=/path/to/ca.pem`
+2. **Full verification (default):** remove `SM_LOCAL_VERIFY_TLS=false`
 
 ## Cloud Backfill (optional)
 
@@ -240,16 +255,7 @@ sudo journalctl -u solar-dashboard -f
 
 **Symptom:** Connection refused or SSL errors in logs.
 **Cause:** Gateway uses a self-signed certificate.
-**Fix:** Add certificate pinning to `.env.local`:
-```bash
-# Get the fingerprint from your gateway
-openssl s_client -connect <gateway-ip>:443 < /dev/null 2>/dev/null \
-  | openssl x509 -fingerprint -sha256 -noout
-```
-Then add to `.env.local`:
-```dotenv
-SM_LOCAL_TLS_FINGERPRINT_SHA256=<the-fingerprint>
-```
+**Fix:** Ensure `.env.local` has `SM_LOCAL_VERIFY_TLS=false`. For additional security, also add fingerprint pinning — see [TLS configuration](#tls-configuration).
 
 ## License
 
