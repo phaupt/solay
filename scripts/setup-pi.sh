@@ -89,19 +89,19 @@ echo "[OK] Playwright Chromium installed."
 if [ ! -f "${REPO_DIR}/.env.local" ]; then
     echo "[>>] Creating .env.local from template ..."
     cat > "${REPO_DIR}/.env.local" <<'ENVEOF'
-# Solar Manager gateway address (required for live mode)
+# Solar Manager gateway address (required)
 SM_LOCAL_BASE_URL=https://YOUR-GATEWAY-IP
 
-# Optional API key
-# SM_LOCAL_API_KEY=
+# API key for the Solar Manager local API (required)
+# Generate with: openssl rand -hex 32
+# Then add the same key on the gateway web UI under API settings.
+SM_LOCAL_API_KEY=
 
-# TLS settings — verification is on by default.
-# For self-signed gateway certs, prefer fingerprint pinning:
+# TLS — the gateway uses a self-signed certificate.
+# Disable verification (simplest):
+SM_LOCAL_VERIFY_TLS=false
+# Or pin the certificate fingerprint (more secure):
 # SM_LOCAL_TLS_FINGERPRINT_SHA256=AA:BB:CC:...
-# Or provide a CA bundle:
-# SM_LOCAL_CA_BUNDLE=/path/to/ca.pem
-# Last resort — disable verification entirely:
-# SM_LOCAL_VERIFY_TLS=false
 
 # Display language: EN, DE, FR, IT
 DASHBOARD_LANGUAGE=DE
@@ -109,7 +109,7 @@ DASHBOARD_LANGUAGE=DE
 # Timezone
 TZ=Europe/Zurich
 
-# E-paper VCOM voltage (REQUIRED — read from the FPC label on your panel, e.g. -1.48)
+# E-paper VCOM voltage (required — read from IT8951 controller, see README)
 EPAPER_VCOM=
 
 # Optional cloud backfill
