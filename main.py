@@ -220,7 +220,10 @@ def run_production_mode(no_display: bool, theme: str | None, lang: str | None):
     display = None
     if not no_display:
         from src.epaper import EpaperDisplay
-        display = EpaperDisplay(vcom=vcom)
+        display = EpaperDisplay(
+            vcom=vcom,
+            full_refresh_interval=config.DISPLAY_FULL_REFRESH_INTERVAL,
+        )
 
     loop = ProductionLoop(storage, collector, renderer, display)
     loop.run()

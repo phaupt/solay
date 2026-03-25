@@ -5,22 +5,22 @@ Developer workflow for the Solar E-Ink Dashboard. For setup and usage, see [READ
 ## Dev Environment Setup
 
 ```bash
-python3.12 -m venv .venv312
-./.venv312/bin/pip install -r requirements.txt
-./.venv312/bin/python -m playwright install chromium
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m playwright install chromium
 ```
 
 ## Running Tests
 
 ```bash
 # All unit tests
-./.venv312/bin/pytest -q
+./.venv/bin/pytest -q
 
 # Single test file
-./.venv312/bin/pytest tests/test_aggregator.py -v
+./.venv/bin/pytest tests/test_aggregator.py -v
 
 # Integration tests (requires real gateway on LAN)
-RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -v
+RUN_LOCAL_SM_TESTS=1 ./.venv/bin/pytest tests/test_local_api_integration.py -v
 ```
 
 ## Preview Modes
@@ -28,7 +28,7 @@ RUN_LOCAL_SM_TESTS=1 ./.venv312/bin/pytest tests/test_local_api_integration.py -
 ### Mock preview
 
 ```bash
-./.venv312/bin/python main.py --mock --port 8090
+./.venv/bin/python main.py --mock --port 8090
 ```
 
 Open:
@@ -51,7 +51,7 @@ These scenario previews keep the same 24h chart context, including the peak-prod
 ### Live preview
 
 ```bash
-./.venv312/bin/python main.py --port 8080
+./.venv/bin/python main.py --port 8080
 ```
 
 Open `http://127.0.0.1:8080/`. Live mode uses your local Solar Manager gateway data via `/v2/stream`, with `/v2/point` as fallback. The browser preview auto-refreshes every 15 seconds.
@@ -59,8 +59,8 @@ Open `http://127.0.0.1:8080/`. Live mode uses your local Solar Manager gateway d
 ### PNG export
 
 ```bash
-./.venv312/bin/python main.py --mock --export-png out/dashboard.png
-./.venv312/bin/python main.py --export-png out/live-dashboard.png
+./.venv/bin/python main.py --mock --export-png out/dashboard.png
+./.venv/bin/python main.py --export-png out/live-dashboard.png
 ```
 
 The export path renders the same HTML/CSS/SVG dashboard through Playwright and writes a PNG at `1872x1404`. Output is quantized to 16 grayscale levels for the E-Ink target.
@@ -70,7 +70,7 @@ The export path renders the same HTML/CSS/SVG dashboard through Playwright and w
 The README depends on three mock screenshots in `docs/screenshots/`. If they are missing or outdated, regenerate them:
 
 ```bash
-./.venv312/bin/python scripts/generate_readme_screenshots.py
+./.venv/bin/python scripts/generate_readme_screenshots.py
 ```
 
 ## Documentation Sync

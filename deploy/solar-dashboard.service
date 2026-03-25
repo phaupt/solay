@@ -8,7 +8,7 @@ Type=simple
 User=%DEPLOY_USER%
 WorkingDirectory=%DEPLOY_DIR%
 EnvironmentFile=%DEPLOY_DIR%/.env.local
-ExecStart=%DEPLOY_DIR%/.venv312/bin/python main.py --production
+ExecStart=%DEPLOY_DIR%/.venv/bin/python main.py --production
 Restart=on-failure
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1

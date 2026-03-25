@@ -33,8 +33,8 @@ async def _screenshot_html(html: str, output_path: Path) -> None:
     except ImportError as exc:  # pragma: no cover - depends on optional runtime package
         raise RuntimeError(
             "PNG export requires the optional 'playwright' package. "
-            "Install it with './.venv312/bin/pip install playwright' and "
-            "then run './.venv312/bin/python -m playwright install chromium'."
+            "Install it with './.venv/bin/pip install playwright' and "
+            "then run './.venv/bin/python -m playwright install chromium'."
         ) from exc
 
     async with async_playwright() as playwright:

@@ -5,11 +5,16 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_USER="$(whoami)"
-IT8951_TAG="v0.5.0"  # Pinned for reproducible builds
+IT8951_REF="master"  # GregDMeyer/IT8951 has no tags; pin to commit after install
+
+# Detect system Python version (e.g. python3.13 on Trixie, python3.12 on Bookworm)
+PY_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+VENV_DIR="${REPO_DIR}/.venv"
 
 echo "=== Solar E-Ink Dashboard — Pi Setup ==="
 echo "Repo directory: ${REPO_DIR}"
 echo "Deploy user:    ${DEPLOY_USER}"
+echo "Python version: ${PY_VERSION}"
 
 # -------------------------------------------------------
 # 1. Enable SPI
@@ -33,17 +38,17 @@ fi
 echo "[>>] Installing system packages ..."
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
-    python3.12 python3.12-dev python3.12-venv \
-    gcc make cython3 \
-    libatlas-base-dev \
+    "python${PY_VERSION}" "python${PY_VERSION}-dev" "python${PY_VERSION}-venv" \
+    gcc make cython3 swig \
+    libblas-dev liblgpio-dev \
     libgbm1 libnss3 libxss1 libasound2
 
 # -------------------------------------------------------
 # 3. Create venv and install Python deps
 # -------------------------------------------------------
-echo "[>>] Creating Python 3.12 venv ..."
-python3.12 -m venv "${REPO_DIR}/.venv312"
-PIP="${REPO_DIR}/.venv312/bin/pip"
+echo "[>>] Creating Python ${PY_VERSION} venv ..."
+"python${PY_VERSION}" -m venv "${VENV_DIR}"
+PIP="${VENV_DIR}/bin/pip"
 $PIP install --upgrade pip setuptools wheel -q
 
 echo "[>>] Installing Python requirements ..."
@@ -56,20 +61,26 @@ echo "[>>] Ensuring Cython is available in venv ..."
 $PIP install cython -q
 
 # -------------------------------------------------------
-# 5. Clone and install IT8951 from source (pinned tag)
+# 5. Clone and install IT8951 from source
 # -------------------------------------------------------
-echo "[>>] Installing IT8951 driver from source (${IT8951_TAG}) ..."
+echo "[>>] Installing IT8951 driver from source (${IT8951_REF}) ..."
 IT8951_TMP="$(mktemp -d)"
-git clone --depth 1 -b "${IT8951_TAG}" https://github.com/GregDMeyer/IT8951.git "${IT8951_TMP}/IT8951"
+git clone --depth 1 -b "${IT8951_REF}" https://github.com/GregDMeyer/IT8951.git "${IT8951_TMP}/IT8951"
 $PIP install "${IT8951_TMP}/IT8951[rpi]" -q
 rm -rf "${IT8951_TMP}"
+
+# RPi.GPIO does not support Pi 5 (RP1 chip). Replace with rpi-lgpio,
+# a drop-in compatibility shim that uses lgpio under the hood.
+echo "[>>] Replacing RPi.GPIO with rpi-lgpio (Pi 5 support) ..."
+$PIP uninstall -y RPi.GPIO -q 2>/dev/null
+$PIP install rpi-lgpio -q
 echo "[OK] IT8951 installed."
 
 # -------------------------------------------------------
 # 6. Install Playwright Chromium
 # -------------------------------------------------------
 echo "[>>] Installing Playwright Chromium browser ..."
-"${REPO_DIR}/.venv312/bin/playwright" install chromium
+"${VENV_DIR}/bin/playwright" install chromium
 echo "[OK] Playwright Chromium installed."
 
 # -------------------------------------------------------
@@ -131,5 +142,5 @@ echo "=== Setup complete ==="
 echo "Next steps:"
 echo "  1. Edit .env.local with your Solar Manager gateway address and EPAPER_VCOM"
 echo "  2. Reboot if SPI was just enabled"
-echo "  3. Test the display: .venv312/bin/python scripts/epaper_test.py --vcom YOUR_VCOM"
+echo "  3. Test the display: .venv/bin/python scripts/epaper_test.py --vcom YOUR_VCOM"
 echo "  4. Start the service: sudo systemctl start solar-dashboard"

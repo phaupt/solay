@@ -103,7 +103,7 @@ class ProductionLoop:
         # Display
         if image is not None and self._display is not None:
             try:
-                self._display.show_full(image)
+                self._display.show(image)
             except Exception:
                 logger.warning("Display failed, attempting sleep/wake reset", exc_info=True)
                 try:
