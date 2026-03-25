@@ -47,7 +47,7 @@
 
 Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash **Raspberry Pi OS Lite (64-bit)**. Enable SSH and configure your Wi-Fi during setup.
 
-The setup script auto-detects the system Python version (3.12 on Bookworm, 3.13 on Trixie).
+The setup script auto-detects the system Python version.
 
 ### 2. Clone the repo and run setup
 
