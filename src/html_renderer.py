@@ -503,8 +503,12 @@ def _build_chart_svg(data: DashboardData, language: str) -> Markup:
         {''.join(grid_lines)}
       </g>
       {peak_line_markup}
+      {f'''<defs><mask id="cons-mask">
+        <rect width="{width}" height="{height}" fill="white"/>
+        <path d="{production_area}" fill="#666"/>
+      </mask></defs>''' if production_area and consumption_area else ''}
       {f'<path class="chart-area chart-area--production" d="{production_area}" />' if production_area else ''}
-      {f'<path class="chart-area chart-area--consumption" d="{consumption_area}" />' if consumption_area else ''}
+      {f'<path class="chart-area chart-area--consumption" d="{consumption_area}" mask="{("url(#cons-mask)" if production_area else "")}" />' if consumption_area else ''}
       {f'<path class="chart-line chart-line--production" d="{production_line}" />' if production_line else ''}
       {f'<path class="chart-line chart-line--consumption" d="{consumption_line}" />' if consumption_line else ''}
       {peak_label_markup}

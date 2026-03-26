@@ -14,8 +14,8 @@
     --chart-axis: #888881;
     --chart-pv-fill: rgba(182, 188, 201, 0.26);
     --chart-pv-line: rgba(136, 142, 156, 0.72);
-    --chart-cons-fill: rgba(112, 117, 132, 0.28);
-    --chart-cons-line: rgba(72, 77, 90, 0.78);
+    --chart-cons-fill: rgba(70, 75, 90, 0.42);
+    --chart-cons-line: rgba(50, 55, 68, 0.85);
     --history-separator: #e2e2dc;
     --shadow: 0 24px 64px rgba(0, 0, 0, 0.09);
     --flow-active: var(--line-active);
