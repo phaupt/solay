@@ -48,7 +48,7 @@ class TestProductionLoopSingleCycle:
 
         mock_build.assert_called_once_with(storage, collector)
         renderer.render.assert_called_once()
-        display.show_full.assert_called_once()
+        display.show.assert_called_once()
 
     @patch("main.build_dashboard_data")
     def test_one_cycle_without_display(self, mock_build, mock_deps):
@@ -71,13 +71,13 @@ class TestProductionLoopSingleCycle:
         loop = ProductionLoop(storage, collector, renderer, display)
         loop._run_one_cycle()  # Should not raise
 
-        display.show_full.assert_not_called()
+        display.show.assert_not_called()
 
     @patch("main.build_dashboard_data")
     def test_display_failure_does_not_crash(self, mock_build, mock_deps):
         storage, collector, renderer, display = mock_deps
         mock_build.return_value = MagicMock()
-        display.show_full.side_effect = RuntimeError("display boom")
+        display.show.side_effect = RuntimeError("display boom")
         from src.production import ProductionLoop
 
         loop = ProductionLoop(storage, collector, renderer, display)

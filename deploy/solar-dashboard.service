@@ -9,8 +9,9 @@ User=%DEPLOY_USER%
 WorkingDirectory=%DEPLOY_DIR%
 EnvironmentFile=%DEPLOY_DIR%/.env.local
 ExecStart=%DEPLOY_DIR%/.venv/bin/python main.py --production
-Restart=on-failure
+Restart=always
 RestartSec=10
+WatchdogSec=300
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

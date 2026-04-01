@@ -7,7 +7,9 @@ timer-based loop with day-rollover handling and retention cleanup.
 from __future__ import annotations
 
 import logging
+import os
 import signal
+import subprocess
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -16,6 +18,64 @@ import config
 from src.aggregator import aggregate_daily_summary
 
 logger = logging.getLogger(__name__)
+
+# vcgencmd get_throttled bit masks
+_THROTTLE_UNDERVOLTAGE_NOW = 0x1
+_THROTTLE_FREQ_CAPPED_NOW = 0x2
+_THROTTLE_THROTTLED_NOW = 0x4
+_THROTTLE_SOFT_TEMP_NOW = 0x8
+_THROTTLE_UNDERVOLTAGE_SINCE = 0x10000
+_THROTTLE_FREQ_CAPPED_SINCE = 0x20000
+_THROTTLE_THROTTLED_SINCE = 0x40000
+_THROTTLE_SOFT_TEMP_SINCE = 0x80000
+
+
+def _check_throttle_state() -> int | None:
+    """Read Pi throttle flags via vcgencmd. Returns None on non-Pi systems."""
+    try:
+        result = subprocess.run(
+            ["vcgencmd", "get_throttled"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        # Output format: "throttled=0x50000"
+        value = result.stdout.strip().split("=", 1)[-1]
+        return int(value, 16)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def _log_throttle_warnings(flags: int) -> None:
+    """Log warnings for active throttle conditions."""
+    if flags & _THROTTLE_UNDERVOLTAGE_NOW:
+        logger.warning("UNDERVOLTAGE detected RIGHT NOW -- check power supply")
+    elif flags & _THROTTLE_UNDERVOLTAGE_SINCE:
+        logger.warning("Undervoltage occurred since last boot -- check power supply")
+
+    if flags & _THROTTLE_THROTTLED_NOW:
+        logger.warning("CPU is being THROTTLED right now")
+    if flags & _THROTTLE_SOFT_TEMP_NOW:
+        logger.warning("Soft temperature limit active -- consider cooling")
+
+
+def _notify_watchdog() -> None:
+    """Ping the systemd watchdog (no-op outside systemd)."""
+    try:
+        addr = os.environ.get("NOTIFY_SOCKET")
+        if not addr:
+            return
+        import socket
+
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            if addr.startswith("@"):
+                addr = "\0" + addr[1:]
+            sock.sendto(b"WATCHDOG=1", addr)
+        finally:
+            sock.close()
+    except Exception:
+        pass
 
 
 def _try_backfill(storage) -> None:
@@ -43,6 +103,8 @@ class ProductionLoop:
         self._tz = tz
         self._current_date = datetime.now(tz).date()
         self._last_cleanup_at = datetime.min.replace(tzinfo=tz)
+        self._last_throttle_check = 0.0
+        self._last_throttle_flags = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -75,6 +137,8 @@ class ProductionLoop:
 
     def _run_one_cycle(self) -> None:
         self._check_day_rollover()
+        self._check_throttle()
+        _notify_watchdog()
 
         # Build dashboard data (lazy import to avoid circular imports).
         try:
@@ -111,6 +175,16 @@ class ProductionLoop:
                     self._display.wake()
                 except Exception:
                     logger.warning("Display reset also failed", exc_info=True)
+
+        # Log cycle result
+        if data.live:
+            logger.info(
+                "Cycle OK: p=%dW c=%dW grid=%dW | rendered=%s displayed=%s",
+                int(data.live.p_w), int(data.live.c_w),
+                int(data.live.grid_w),
+                image is not None,
+                image is not None and self._display is not None,
+            )
 
         self._maybe_cleanup()
 
@@ -180,6 +254,29 @@ class ProductionLoop:
                 self._last_cleanup_at = now
             except Exception:
                 logger.warning("Retention cleanup failed", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Hardware health
+    # ------------------------------------------------------------------
+
+    def _check_throttle(self) -> None:
+        """Check Pi throttle/undervoltage state every 5 minutes."""
+        now = time.monotonic()
+        if now - self._last_throttle_check < 300:
+            return
+        self._last_throttle_check = now
+
+        flags = _check_throttle_state()
+        if flags is None:
+            return
+
+        # Only log when flags change or when an active condition persists.
+        if flags != self._last_throttle_flags:
+            if flags == 0 and self._last_throttle_flags != 0:
+                logger.info("Throttle state cleared (power OK)")
+            elif flags != 0:
+                _log_throttle_warnings(flags)
+            self._last_throttle_flags = flags
 
     # ------------------------------------------------------------------
     # Shutdown
