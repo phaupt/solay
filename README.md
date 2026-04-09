@@ -151,7 +151,7 @@ All settings are configured via environment variables in `.env.local`.
 | `DASHBOARD_LANGUAGE` | Display language: `EN`, `DE`, `FR`, `IT` | `EN` |
 | `TZ` | Timezone | `Europe/Zurich` |
 | `DISPLAY_UPDATE_INTERVAL` | E-paper refresh cadence in seconds | `15` |
-| `DISPLAY_FULL_REFRESH_INTERVAL` | Full GC16 refresh (brief black flash) every N updates; GL16 is used in between for flicker-free updates. At 15s update interval, 240 = once per hour | `240` |
+| `DISPLAY_FULL_REFRESH_INTERVAL` | Full GC16 refresh (brief black flash) every N updates; GL16 partial refreshes are used in between. At 15s update interval, 60 = once every 15 minutes. Stretching this much further leaves visible darkness drift between partial-refreshed regions. | `60` |
 
 ### TLS configuration
 
