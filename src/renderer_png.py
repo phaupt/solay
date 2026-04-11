@@ -99,6 +99,7 @@ class PersistentPlaywrightRenderer:
         lang: str | None = None,
         grayscale_levels: int | None = None,
         timeout: float | None = None,
+        recycle_interval: int | None = None,
     ) -> None:
         self._theme = theme
         self._lang = lang
@@ -106,6 +107,9 @@ class PersistentPlaywrightRenderer:
             config.EXPORT_GRAYSCALE_LEVELS if grayscale_levels is None else grayscale_levels
         )
         self._timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
+        self._recycle_interval = (
+            config.RENDERER_RECYCLE_INTERVAL if recycle_interval is None else recycle_interval
+        )
 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue | None = None  # type: ignore[type-arg]
@@ -156,6 +160,8 @@ class PersistentPlaywrightRenderer:
             )
             self._ready.set()
 
+            renders_since_recycle = 0
+
             while True:
                 item = await self._queue.get()
                 if item is _SENTINEL:
@@ -168,9 +174,32 @@ class PersistentPlaywrightRenderer:
                     img = _bytes_to_image(png_bytes, self._grayscale_levels)
                     future.set_result(img)
                     self._consecutive_failures = 0
+                    renders_since_recycle += 1
                 except Exception as exc:
                     self._consecutive_failures += 1
                     future.set_exception(exc)
+
+                # Recycle the page periodically to reclaim Chromium memory.
+                if (
+                    self._recycle_interval > 0
+                    and renders_since_recycle >= self._recycle_interval
+                ):
+                    try:
+                        await page.close()
+                        page = await browser.new_page(
+                            viewport={
+                                "width": config.DISPLAY_WIDTH,
+                                "height": config.DISPLAY_HEIGHT,
+                            },
+                            device_scale_factor=1,
+                        )
+                        renders_since_recycle = 0
+                        log.info(
+                            "Recycled Chromium page after %d renders",
+                            self._recycle_interval,
+                        )
+                    except Exception:
+                        log.warning("Page recycle failed", exc_info=True)
 
             await browser.close()
 

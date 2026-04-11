@@ -14,5 +14,12 @@ RestartSec=10
 WatchdogSec=300
 Environment=PYTHONUNBUFFERED=1
 
+# Memory protection: cap the service so OOM kills it (not random system
+# processes).  Chromium + Python + numpy typically need ~600-800 MB;
+# 1.5 G gives headroom while protecting the remaining ~2.5 G for the OS.
+MemoryMax=1536M
+MemoryHigh=1280M
+OOMPolicy=restart
+
 [Install]
 WantedBy=multi-user.target

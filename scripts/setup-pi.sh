@@ -33,6 +33,47 @@ else
 fi
 
 # -------------------------------------------------------
+# 1b. Enable hardware watchdog
+# -------------------------------------------------------
+if grep -q "^dtparam=watchdog=on" "$BOOT_CONFIG" 2>/dev/null; then
+    echo "[OK] Hardware watchdog already enabled in ${BOOT_CONFIG}"
+else
+    echo "[>>] Enabling hardware watchdog in ${BOOT_CONFIG} ..."
+    echo "dtparam=watchdog=on" | sudo tee -a "$BOOT_CONFIG" > /dev/null
+    echo "[!!] Hardware watchdog enabled — a reboot is required to activate it."
+fi
+
+# Configure the kernel watchdog daemon to reboot after 15 seconds of
+# unresponsiveness.  This is the last-resort safety net: if systemd itself
+# hangs (e.g. OOM pressure freezes the system), the BCM2835 hardware
+# watchdog triggers a hard reboot.
+if [ -f /etc/watchdog.conf ]; then
+    if ! grep -q "^watchdog-device" /etc/watchdog.conf 2>/dev/null; then
+        echo "[>>] Configuring /etc/watchdog.conf ..."
+        sudo apt-get install -y -qq watchdog
+        sudo tee /etc/watchdog.conf > /dev/null <<'WDEOF'
+watchdog-device = /dev/watchdog
+watchdog-timeout = 15
+max-load-1 = 24
+WDEOF
+        sudo systemctl enable watchdog
+        echo "[OK] Hardware watchdog configured (15 s timeout)"
+    else
+        echo "[OK] /etc/watchdog.conf already configured"
+    fi
+else
+    echo "[>>] Installing and configuring watchdog daemon ..."
+    sudo apt-get install -y -qq watchdog
+    sudo tee /etc/watchdog.conf > /dev/null <<'WDEOF'
+watchdog-device = /dev/watchdog
+watchdog-timeout = 15
+max-load-1 = 24
+WDEOF
+    sudo systemctl enable watchdog
+    echo "[OK] Hardware watchdog configured (15 s timeout)"
+fi
+
+# -------------------------------------------------------
 # 2. Install system dependencies
 # -------------------------------------------------------
 echo "[>>] Installing system packages ..."

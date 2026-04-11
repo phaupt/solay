@@ -201,12 +201,15 @@ class ProductionLoop:
             logger.debug("Ignoring error during renderer teardown", exc_info=True)
 
         try:
-            self._renderer = self._renderer.__class__(
+            kwargs = dict(
                 theme=getattr(self._renderer, "_theme", None),
                 lang=getattr(self._renderer, "_lang", None),
                 grayscale_levels=getattr(self._renderer, "_grayscale_levels", None),
                 timeout=getattr(self._renderer, "_timeout", None),
             )
+            if hasattr(self._renderer, "_recycle_interval"):
+                kwargs["recycle_interval"] = self._renderer._recycle_interval
+            self._renderer = self._renderer.__class__(**kwargs)
             self._render_failures = 0
             logger.info("Renderer restarted successfully")
         except Exception:

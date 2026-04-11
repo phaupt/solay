@@ -103,5 +103,9 @@ DISPLAY_UPDATE_INTERVAL = int(os.getenv("DISPLAY_UPDATE_INTERVAL", "15"))
 EPAPER_VCOM = os.getenv("EPAPER_VCOM", "")
 DISPLAY_FULL_REFRESH_INTERVAL = int(os.getenv("DISPLAY_FULL_REFRESH_INTERVAL", "60"))
 
+# Number of render cycles before the Playwright browser page is recycled to
+# reclaim accumulated Chromium memory.  Default 200 ≈ 50 min at 15 s cadence.
+RENDERER_RECYCLE_INTERVAL = int(os.getenv("RENDERER_RECYCLE_INTERVAL", "200"))
+
 # --- Export ---
 EXPORT_GRAYSCALE_LEVELS = int(os.getenv("EXPORT_GRAYSCALE_LEVELS", "16"))
