@@ -33,8 +33,14 @@ else
 fi
 
 # -------------------------------------------------------
-# 1b. Enable hardware watchdog
+# 1b. Enable hardware watchdog (BCM2835)
 # -------------------------------------------------------
+# dtparam exposes /dev/watchdog. systemd PID 1 opens it automatically
+# and pings it when RuntimeWatchdogSec is set. Do NOT install the
+# `watchdog` daemon package — systemd holds the device exclusively,
+# so the daemon fails with "Device or resource busy" and the HW
+# watchdog is never fed. On hang, the BCM2835 resets after ~60s
+# (hardware-clamped minimum on Pi 5).
 if grep -q "^dtparam=watchdog=on" "$BOOT_CONFIG" 2>/dev/null; then
     echo "[OK] Hardware watchdog already enabled in ${BOOT_CONFIG}"
 else
@@ -43,34 +49,51 @@ else
     echo "[!!] Hardware watchdog enabled — a reboot is required to activate it."
 fi
 
-# Configure the kernel watchdog daemon to reboot after 15 seconds of
-# unresponsiveness.  This is the last-resort safety net: if systemd itself
-# hangs (e.g. OOM pressure freezes the system), the BCM2835 hardware
-# watchdog triggers a hard reboot.
-if [ -f /etc/watchdog.conf ]; then
-    if ! grep -q "^watchdog-device" /etc/watchdog.conf 2>/dev/null; then
-        echo "[>>] Configuring /etc/watchdog.conf ..."
-        sudo apt-get install -y -qq watchdog
-        sudo tee /etc/watchdog.conf > /dev/null <<'WDEOF'
-watchdog-device = /dev/watchdog
-watchdog-timeout = 15
-max-load-1 = 24
-WDEOF
-        sudo systemctl enable watchdog
-        echo "[OK] Hardware watchdog configured (15 s timeout)"
-    else
-        echo "[OK] /etc/watchdog.conf already configured"
-    fi
+# Ensure the conflicting watchdog daemon is not running.
+if systemctl is-enabled watchdog.service >/dev/null 2>&1; then
+    echo "[>>] Disabling legacy watchdog daemon (conflicts with systemd) ..."
+    sudo systemctl disable --now watchdog.service 2>/dev/null || true
+fi
+
+# Configure systemd to ping /dev/watchdog every RuntimeWatchdogSec.
+# RebootWatchdogSec bounds clean shutdowns so a hang during stop
+# still triggers a hard reset within 2 minutes.
+SYSTEMD_CONF="/etc/systemd/system.conf"
+if grep -qE '^RuntimeWatchdogSec=' "$SYSTEMD_CONF" 2>/dev/null; then
+    echo "[OK] systemd RuntimeWatchdogSec already set in ${SYSTEMD_CONF}"
 else
-    echo "[>>] Installing and configuring watchdog daemon ..."
-    sudo apt-get install -y -qq watchdog
-    sudo tee /etc/watchdog.conf > /dev/null <<'WDEOF'
-watchdog-device = /dev/watchdog
-watchdog-timeout = 15
-max-load-1 = 24
-WDEOF
-    sudo systemctl enable watchdog
-    echo "[OK] Hardware watchdog configured (15 s timeout)"
+    echo "[>>] Enabling systemd hardware-watchdog integration ..."
+    sudo cp "$SYSTEMD_CONF" "${SYSTEMD_CONF}.bak.$(date +%Y%m%d-%H%M%S)"
+    sudo sed -i \
+        -e 's|^#RuntimeWatchdogSec=off|RuntimeWatchdogSec=15|' \
+        -e 's|^#RebootWatchdogSec=10min|RebootWatchdogSec=2min|' \
+        "$SYSTEMD_CONF"
+    sudo systemctl daemon-reexec
+    echo "[OK] systemd watchdog integration active (verify with: wdctl /dev/watchdog0)"
+fi
+
+# -------------------------------------------------------
+# 1c. Enable persistent journald storage
+# -------------------------------------------------------
+# Raspberry Pi OS ships a drop-in at
+# /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf that
+# forces Storage=volatile (RAM-only). Without overriding it, all
+# logs are lost on reboot — making crash forensics impossible.
+JOURNALD_OVERRIDE="/etc/systemd/journald.conf.d/50-persistent.conf"
+if [ -f "$JOURNALD_OVERRIDE" ]; then
+    echo "[OK] journald persistent-storage override already present"
+else
+    echo "[>>] Enabling persistent journald storage ..."
+    sudo mkdir -p /etc/systemd/journald.conf.d
+    sudo tee "$JOURNALD_OVERRIDE" > /dev/null <<'JDEOF'
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+SystemKeepFree=500M
+JDEOF
+    sudo systemctl restart systemd-journald
+    sudo journalctl --flush
+    echo "[OK] journald persistent storage active (verify: journalctl --list-boots)"
 fi
 
 # -------------------------------------------------------
