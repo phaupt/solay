@@ -97,6 +97,21 @@ JDEOF
 fi
 
 # -------------------------------------------------------
+# 1d. Install network connectivity watchdog
+# -------------------------------------------------------
+# The HW watchdog catches kernel/service hangs but not the failure
+# mode where the WiFi stack silently stops reconnecting after a deauth
+# (NetworkManager can park in `no-secrets` state for hours while the
+# rest of the system looks healthy). This small script reboots the Pi
+# if the default gateway is unreachable for ~5 minutes.
+echo "[>>] Installing network connectivity watchdog ..."
+sudo install -m 0755 "${REPO_DIR}/scripts/network-watchdog.sh" /usr/local/sbin/network-watchdog.sh
+sudo cp "${REPO_DIR}/deploy/network-watchdog.service" /etc/systemd/system/network-watchdog.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now network-watchdog.service
+echo "[OK] network-watchdog installed and running"
+
+# -------------------------------------------------------
 # 2. Install system dependencies
 # -------------------------------------------------------
 echo "[>>] Installing system packages ..."
